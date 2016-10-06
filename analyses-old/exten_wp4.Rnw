@@ -1,0 +1,816 @@
+\documentclass{article}
+\usepackage{graphicx, verbatim, ulem, fancyvrb, setspace,xspace,color,subcaption,amsmath}
+\usepackage{inputenc,float,afterpage,cite}
+\setlength{\tabcolsep}{1pt}
+
+\usepackage[margin=1in]{geometry}
+
+\title{Extension Analysis}
+\author{Lauren Goodwin\\[.1in]
+Advisor: Steve Cherry}
+\date{Spring 2015}
+
+
+
+\begin{document}
+<<setup, include=FALSE, cache=FALSE,echo=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width=5, fig.height=4, out.width='\\linewidth', dev='pdf', concordance=TRUE)
+options(replace.assign=TRUE,width=112, digits = 4, max.print=1000,
+        show.signif.stars = TRUE)
+require(xtable)
+require(foreign)
+require(arm)
+require(ggplot2)
+require(nortest)
+require(nlme)
+require(lattice)
+require(lme4)
+require(R2jags)
+require(gee)
+
+@
+
+
+<<data,echo=FALSE>>=
+
+
+##without face statements
+all_data <- read.csv("../data/all_without_table_codes.csv")
+all_data$extension_rate<-with(all_data, ee_count/ae_count) 
+all_data$se_count<-with(all_data, ae_count-ee_count)
+
+##data
+all_data$filer_category<-ifelse(all_data$filer_category=="Large Accelerated Filer", "LAF",
+                                ifelse(all_data$filer_category=="Large Accelerated\nFiler", "LAF",
+                                  ifelse(all_data$filer_category=="Accelerated Filer","AF",
+                                         ifelse(all_data$filer_category=="Non-accelerated Filer","NAF",
+                                                ifelse(all_data$filer_category=="Smaller Reporting Company","SRC",0)))))
+
+
+
+
+##label SIC by first two integers
+SIC<-sprintf("%04d", all_data$standard_industry_code)
+##eventually make a function. 
+#SIC_rename<-function(SIC){
+                   names<-c(rep("AFF",9),rep("min",5),rep("const",3),rep("manu",20),rep("TPB",10)
+                              ,rep("WT",2),rep("RT",8),rep("FIR",8),rep("serv",20),rep("PA",9),rep("other",5))
+                    AFF_code<-sprintf("%02d", c(01,02,03,04,05,06,07,08,09))
+                    min_code<-c(10:14)
+                    const_code<-c(15:17)
+                    manu_code<-c(20:39)
+                    TPB_code<-c(40:49)
+                    WT_code<-c(50:51)
+                    RT_code<-c(52:59)
+                    FIR_code<-c(60:67)
+                    serv_code<-c(70:89)
+                    PA_code<-c(91:99)
+                    other_code<-sprintf("%02d", c(18,19,68,69,-1))
+                    codes<-c(AFF_code,min_code,const_code,manu_code,TPB_code,WT_code,RT_code,FIR_code,serv_code,PA_code,other_code)
+                    code_mat<-matrix(cbind(names,codes),nrow=length(codes),ncol=2)
+                    n<-length(SIC)
+                    
+
+                      for(i in 1:n){
+                      split<-as.numeric(substr(as.character(SIC[i]),start=1,stop=2))
+                      match_index<-match(split,code_mat[,2], nomatch=0)
+                     ifelse(match_index==0,SIC[i]<-"other",
+                      SIC[i]<-code_mat[match_index,1])
+                     #SIC[i]<-code_mat[match_index,1]
+                      }
+  
+#}
+
+all_data$SIT<-SIC
+
+#SIC_rename(all_data$standard_industry_code)
+
+##subset data by form type 10K and 10Q
+all_data_10K<-subset(all_data,form_type=="10-K")
+all_data_10Q<-subset(all_data,form_type=="10-Q")
+
+
+
+
+
+all_data_2012_10K<-subset(all_data_10K,year_only >= 2012)
+all_data_2012_10Q<-subset(all_data_10Q,year_only >= 2012)
+all_data_1213_10K<-subset(all_data_10K,year_only == 2012 | year_only== 2013)
+all_data_1213_10Q<-subset(all_data_10Q,year_only == 2012 | year_only== 2013)
+
+
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10K 
+all_data_LAF<- subset(all_data_2012_10K, filer_category=="LAF")
+all_data_AF<- subset(all_data_2012_10K, filer_category=="AF")
+all_data_NAF<- subset(all_data_2012_10K, filer_category=="NAF")
+all_data_SRC<- subset(all_data_2012_10K, filer_category=="SRC")
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10Q
+all_data_LAFQ<- subset(all_data_2012_10Q, filer_category=="LAF")
+all_data_AFQ<- subset(all_data_2012_10Q, filer_category=="AF")
+all_data_NAFQ<- subset(all_data_2012_10Q, filer_category=="NAF")
+all_data_SRCQ<- subset(all_data_2012_10Q, filer_category=="SRC")
+
+
+
+###with face statements
+all_data_fs <- read.csv("~/Documents/Workiva/MIA/Extensions_analysis/extension_model/all_with_table_codes.csv")
+all_data_fs$extension_rate<-with(all_data_fs, ee_count/ae_count) 
+all_data_fs$se_count<-with(all_data_fs, ae_count-ee_count)
+
+##data
+all_data_fs$filer_category<-ifelse(all_data_fs$filer_category=="Large Accelerated Filer", "LAF",
+                                ifelse(all_data_fs$filer_category=="Large Accelerated\nFiler", "LAF",
+                                  ifelse(all_data_fs$filer_category=="Accelerated Filer","AF",
+                                         ifelse(all_data_fs$filer_category=="Non-accelerated Filer","NAF",
+                                                ifelse(all_data_fs$filer_category=="Smaller Reporting Company","SRC",0)))))
+
+
+SIC<-sprintf("%04d", all_data_fs$standard_industry_code)
+##eventually make a function. 
+#SIC_rename<-function(SIC){
+                   names<-c(rep("AFF",9),rep("min",5),rep("const",3),rep("manu",20),rep("TPB",10)
+                              ,rep("WT",2),rep("RT",8),rep("FIR",8),rep("serv",20),rep("PA",9),rep("other",5))
+                    AFF_code<-sprintf("%02d", c(01,02,03,04,05,06,07,08,09))
+                    min_code<-c(10:14)
+                    const_code<-c(15:17)
+                    manu_code<-c(20:39)
+                    TPB_code<-c(40:49)
+                    WT_code<-c(50:51)
+                    RT_code<-c(52:59)
+                    FIR_code<-c(60:67)
+                    serv_code<-c(70:89)
+                    PA_code<-c(91:99)
+                    other_code<-sprintf("%02d", c(18,19,68,69,-1))
+                    codes<-c(AFF_code,min_code,const_code,manu_code,TPB_code,WT_code,RT_code,FIR_code,serv_code,PA_code,other_code)
+                    code_mat<-matrix(cbind(names,codes),nrow=length(codes),ncol=2)
+                    n<-length(SIC)
+                    
+
+                      for(i in 1:n){
+                      split<-as.numeric(substr(as.character(SIC[i]),start=1,stop=2))
+                      match_index<-match(split,code_mat[,2], nomatch=0)
+                     ifelse(match_index==0,SIC[i]<-"other",
+                      SIC[i]<-code_mat[match_index,1])
+                     #SIC[i]<-code_mat[match_index,1]
+                      }
+  
+#}
+
+all_data_fs$SIT<-SIC
+##subset data by form type 10K and 10Q
+all_data_10Kfs<-subset(all_data_fs,form_type=="10-K")
+all_data_10Qfs<-subset(all_data_fs,form_type=="10-Q")
+
+
+
+
+all_data_2012_10Kfs<-subset(all_data_10Kfs,year_only >= 2012)
+all_data_2012_10Qfs<-subset(all_data_10Qfs,year_only >= 2012)
+all_data_1213_10Kfs<-subset(all_data_10Kfs,year_only == 2012 | year_only== 2013)
+all_data_1213_10Qfs<-subset(all_data_10Qfs,year_only == 2012 | year_only== 2013)
+
+
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10K 
+all_data_LAFfs<- subset(all_data_2012_10Kfs, filer_category=="LAF")
+all_data_AFfs<- subset(all_data_2012_10Kfs, filer_category=="AF")
+all_data_NAFfs<- subset(all_data_2012_10Kfs, filer_category=="NAF")
+all_data_SRCfs<- subset(all_data_2012_10Kfs, filer_category=="SRC")
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10Q
+all_data_LAFQfs<- subset(all_data_2012_10Qfs, filer_category=="LAF")
+all_data_AFQfs<- subset(all_data_2012_10Qfs, filer_category=="AF")
+all_data_NAFQfs<- subset(all_data_2012_10Qfs, filer_category=="NAF")
+all_data_SRCQfs<- subset(all_data_2012_10Qfs, filer_category=="SRC")
+
+foot_notes_data <- read.csv("~/Documents/Workiva/MIA/Extensions_analysis/extension_model/foot_notes_data.csv")
+foot_notes_data$extension_rate<-with(foot_notes_data, ee_count/ae_count) 
+foot_notes_data$se_count<-with(all_data, ae_count-ee_count)
+
+##data
+foot_notes_data$filer_category<-ifelse(foot_notes_data$filer_category=="Large Accelerated Filer", "LAF",
+                                ifelse(foot_notes_data$filer_category=="Large Accelerated\nFiler", "LAF",
+                                  ifelse(foot_notes_data$filer_category=="Accelerated Filer","AF",
+                                         ifelse(foot_notes_data$filer_category=="Non-accelerated Filer","NAF",
+                                                ifelse(foot_notes_data$filer_category=="Smaller Reporting Company","SRC",0)))))
+
+
+
+
+##label SIC by first two integers
+SIC<-sprintf("%04d", foot_notes_data$standard_industry_code)
+##eventually make a function. 
+#SIC_rename<-function(SIC){
+                   names<-c(rep("AFF",9),rep("min",5),rep("const",3),rep("manu",20),rep("TPB",10)
+                              ,rep("WT",2),rep("RT",8),rep("FIR",8),rep("serv",20),rep("PA",9),rep("other",5))
+                    AFF_code<-sprintf("%02d", c(01,02,03,04,05,06,07,08,09))
+                    min_code<-c(10:14)
+                    const_code<-c(15:17)
+                    manu_code<-c(20:39)
+                    TPB_code<-c(40:49)
+                    WT_code<-c(50:51)
+                    RT_code<-c(52:59)
+                    FIR_code<-c(60:67)
+                    serv_code<-c(70:89)
+                    PA_code<-c(91:99)
+                    other_code<-sprintf("%02d", c(18,19,68,69,-1))
+                    codes<-c(AFF_code,min_code,const_code,manu_code,TPB_code,WT_code,RT_code,FIR_code,serv_code,PA_code,other_code)
+                    code_mat<-matrix(cbind(names,codes),nrow=length(codes),ncol=2)
+                    n<-length(SIC)
+                    
+
+                      for(i in 1:n){
+                      split<-as.numeric(substr(as.character(SIC[i]),start=1,stop=2))
+                      match_index<-match(split,code_mat[,2], nomatch=0)
+                     ifelse(match_index==0,SIC[i]<-"other",
+                      SIC[i]<-code_mat[match_index,1])
+                     #SIC[i]<-code_mat[match_index,1]
+                      }
+  
+#}
+
+foot_notes_data$SIT<-SIC
+
+#SIC_rename(all_data$standard_industry_code)
+
+##subset data by form type 10K and 10Q
+fn_data_10K<-subset(foot_notes_data,form_type=="10-K")
+fn_data_10Q<-subset(foot_notes_data,form_type=="10-Q")
+
+
+
+
+fn_data_2012_10K<-subset(fn_data_10K,year_only >= 2012)
+fn_data_2012_10Q<-subset(fn_data_10Q,year_only >= 2012)
+fn_data_1213_10K<-subset(fn_data_10K,year_only == 2012 | year_only== 2013)
+fn_data_1213_10Q<-subset(fn_data_10Q,year_only == 2012 | year_only== 2013)
+
+
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10K 
+fn_data_LAF<- subset(fn_data_2012_10K, filer_category=="LAF")
+fn_data_AF<- subset(fn_data_2012_10K, filer_category=="AF")
+fn_data_NAF<- subset(fn_data_2012_10K, filer_category=="NAF")
+fn_data_SRC<- subset(fn_data_2012_10K, filer_category=="SRC")
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10Q
+fn_data_LAFQ<- subset(fn_data_2012_10Q, filer_category=="LAF")
+fn_data_AFQ<- subset(fn_data_2012_10Q, filer_category=="AF")
+fn_data_NAFQ<- subset(fn_data_2012_10Q, filer_category=="NAF")
+fn_data_SRCQ<- subset(fn_data_2012_10Q, filer_category=="SRC")
+
+
+#test<-subset(all_data_2012_10K,all_data_2012_10K$year==2012 & all_data_2012_10K$filer_category=="LAF")
+
+
+#all_data_2012_10K$extension_rate<-remove_outliers(all_data_2012_10K$extension_rate)
+all_data_2012_10Kp<-all_data_2012_10K
+
+all_data_2012_10K<-all_data_2012_10K[-which(all_data_2012_10K$taxonomy==2009 & all_data_2012_10K$filer_category=="NAF"),]
+
+@
+
+
+
+
+\maketitle
+
+\tableofcontents
+
+\newpage
+\section{Introduction and Background}
+\noindent One of the basic features and strengths of eXtensible Business Reporting Language (XBRL) is the ability to create custom elements or unique tags, referred to as extensions. With the U.S. Securities and Exchange Commission's (SEC) implementation of XBRL, filers may create extensions within certain guidelines. However, it has been observed that filers create extensions which are materially identical to existing standard elements. Unnecessary extensions impair the usability of XBRL data by introducing meaningless variability. A benefit of XBRL is that it enables company comparisons by creating a data set shared at least two companies. However, if a company creates an extension then direct comparison of the company to others is difficult. For instance, if a company files an extended element that is identical to existing standard elements then this company's element can not be directly compared to other companies who filed the existing standard element. So comparison between company filings is not possible.\\
+
+\noindent Several studies have shown that approximately 50\% of extensions are unnecessary. A recent SEC staff observation found that a large portion of extensions are reasonable and appropriate, and the SEC has stated that extension rates will be reduced as filers learn more about XBRL. However, Workiva's marketing innovation analysis team suggests this is not the case. Workiva created and maintains Wdesk, which is a cloud-based platform for companies to collect, manage, report, and analyze business data.\\ 
+
+\noindent This analysis seeks to understand the trend of extensions over time and the influential variables of extensions.  
+\subsection{Filing Basics}
+``XBRL, eXtensible Business Reporting Language, is an XML-based markup language used to communicate financial and business data electronically."[3] XBRL is a reporting language that encodes financial statements with context so that information is computer-readable. These statements can then be read automatically and managed more efficiently. For example, a company wants to report net sales of 131,383. However, more information is required, such as currency, scaling, over what time period, etc. XBRL will tag net sales of 131,383 along with the required context. To be able to tag items the user needs a set of defined elements, referred to as a XBRL US Generally Accepted Accounting Practices (GAAP) taxonomy. When preparing a financial statement, the company will use a XBRL US GAAP taxonomy to match each piece of information to an element. An element represents the financial reporting concept. (Figure 1)\\
+\begin{figure}[h!]
+\includegraphics[scale=.6]{element.png}
+\includegraphics[scale=.6]{element2.png}
+\caption{An element and it's break down}
+\end{figure}
+\newline 
+\noindent The matching process is referred to as mapping. During this mapping process, preparers are able to {\it extend} the US GAAP taxonomy by creating new elements. There are several reasons for extending the taxonomy. For example, an element a company would like to use to tag a piece of their financial information may not exist within the US GAAP taxonomy, so XBRL allows the preparer to create a custom element. The extension then must be validated as well as the entire financial report. \\
+\begin{figure}[h!]
+\centering 
+\includegraphics[scale=.5]{tax.png}
+\caption{XBRL financial report process}
+\end{figure}
+\newline 
+\noindent When a company extends an element direct comparisons of two companies are impossible. Not all extensions are necessary and some filers are aware they are unnecessary but extend anyways. \\
+
+
+\section{Objectives and Questions}
+Objectives:
+\begin{itemize}
+\item To analyze extension rates in XBRL filings across various dimensions to discover trends in rates over time. 
+
+\end{itemize}
+
+\noindent Questions:
+\begin{itemize}
+\item What factors have a strong association with extensions?
+\item Are extension rates changing over time?
+\end{itemize}
+
+\section{Methods}
+\subsection{Data Collection}
+Data were collected from all companies publicly traded in the United States.  The data were gathered from the SEC via FTP and RSS feed.  The data are initially encoded in XBRL. Once obtained the data are put into a PostgreSQL database based on the Arelle data model (Figure 3)(the code can be provided upon request).\\
+
+\noindent The data contains information on filings from years 2008 to 2014. However, not all companies were required to file until the year 2012. Accordingly, only data from 2012 to 2014 will be analyzed. Furthermore, the implementation of XBRL initially was rough so the data are inconsistent in earlier years.\\
+
+\noindent The response variable is defined as,
+\begin{center}
+$\displaystyle{\text{extension rate} =\frac{\text{number of extended elements}}{\text{total elements}}}$
+\end{center}
+
+\noindent Where {\it total elements} is the sum of the counts of extended elements and the counts of standard elements. Extended elements are defined as elements that were custom made due to the element not existing or other reasons. A Standard element is defined as an element that is recognized by GAAP. Therefore, we can consider an element either extended or not (a standard element). Thus extension rate is a proportion based on binary counts. \\
+
+\noindent The following explanatory variables were initially collected:
+
+\begin{itemize}
+\item Standard Industry Code: Four digit code to classify industry area of the company. Classification was based on the SIC code website. For example Safeway would be classified as retail and thus have a SIC code associated with retail.[4]
+\item Creation Software: Software used to create filing; for example Workiva (formally known as Webfilings) Wdesk products. 
+\item Filer status: large accelerated filers (LAF, $n=27275$), accelerated filers (AF, $n=18182$), non accelerated filers (NAF, $n=10351$), and small reporting companies (SRC, $n= 45053$).
+\item Year: Calendar year of filing 2012 ($n=32315$), 2013 ($n=31213$), or 2014 ($n=15152$).
+\item Taxonomy: Taxonomy year used for filing. Taxonomy is defined as a set of rules that a company must abide by when filing.  A company can choose to file with the current taxonomy year or the past two versions. For example in 2014 companies could file a 2014, 2013, or 2012 taxonomy. In this data set there are taxonomy years 2009 ($n=7938$), 2011 ($n= 32740$), 2012 ($n=36351$), 2013 ($n=23786$), and 2014 ($n=26$). The 2010 taxonomy does not exist. 
+\item Form Type: If filing a 10-K ($n= 21826$) or 10-Q ($n=67604$). There are other form types, this analysis is only concerned with these two.
+
+\end{itemize}
+
+\subsection{Preliminary Analysis}
+The preliminary stage of the analysis was to plot the raw data to get an idea of what trends were apparent and to get an idea of what explanatory variables were to be included in the model. It was already determined that there would be two models since 10-K are only filed once a year and 10-Q filed quarterly. So the 10-K summarizes information from the 10-Q filings.
+\pagebreak
+\begin{figure}[h!]
+\includegraphics[scale=.4]{sql_diagram.png}\\
+\caption{Arelle data model}
+\end{figure}
+\pagebreak
+\subsubsection{Extension rate by taxonomy}
+There appears to be an decreasing trend in extension rate as taxonomy year increases from taxonomy 2012 to 2014 for both the 10-K and 10-Q forms.(Figure 4) When the plot is separated by the four filer categories we do not see one consistent trend. In addition, the NAF filer category at taxonomy 2009 only has one data point. This data point is an outlier and since linear regression is not resistant to outliers this point potentially could alter the estimated model coefficients. Therefore, this point will be removed.   \\
+
+\begin{figure}[h!]
+<<boxplot5,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6, fig.show='hold', out.height="3in", out.width="3in">>=
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot",
+      main="Extension Rate by Taxonomy for 10-K", xlab="Taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot",
+      main="Extension Rate by Taxonomy for 10-Q", xlab="Taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+@
+\caption{Extension rate by taxonomy for 10-K and 10-Q}
+\end{figure}
+
+\begin{figure}[h!]
+<<boxplot2,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6, out.height="3in", out.width="3in",fig.show='hold'>>=
+
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot", facets = ~filer_category,
+      main="Extension Rate by Taxonomy and Filing Status for 10-K", xlab="taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot", facets = ~filer_category, 
+      main="Extension Rate by Taxonomy and Filing Status for 10-Q", xlab="taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+@
+\caption{Extension rate by filing status and taxonomy for 10-K and 10-Q}
+\end{figure}
+
+\subsubsection{Extension rate by year}
+There does not appear to be an overwhelming trend in extension rate as year increases for both the 10-K and 10-Q forms.(Figure 6) However, if the plot is separated by the four filer categories we see that extension rates are remaining roughly constant as year increases.(Figure 7) \\
+\begin{figure}[h!]
+<<boxplot1,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6, fig.show='hold', out.height="3in", out.width="3in">>=
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot",
+      main="Extension Rate by Year for 10-K", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot",
+      main="Extension Rate by Year for 10-Q", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+
+
+@
+
+\caption{Extension rate by year for 10-K and 10-Q}
+\end{figure}
+
+\begin{figure}[h!]
+<<boxplot7,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6, out.height="3in", out.width="3in",fig.show='hold'>>=
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot", facets = ~filer_category,
+      main="Extension Rate by Year and Filing Status for 10-K", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot", facets = ~filer_category, 
+      main="Extension Rate by Year and Filing Status for 10-Q", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+@
+\caption{Extension rate by filing status and year for 10-K and 10-Q}
+\end{figure}
+
+
+\subsubsection{Extension rate by filing status}
+It appears that all four categories have around the same rates of extension for both 10-K and 10-Q.(Figure 8)
+\begin{figure}[h!]
+<<boxplot3,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6, out.height="3in", out.width="3in",fig.show='hold'>>=
+qplot(x=filer_category,y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot", 
+      main="Extension Rate by Filing Status for 10-K", xlab="Filing Status", ylab="Extension Rate",
+      fill = filer_category) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1"))
+
+qplot(x=filer_category,y = extension_rate, data = all_data_2012_10Q, geom = "boxplot", 
+      main="Extension Rate by Filing Status for 10-Q", xlab="Filing Status", ylab="Extension Rate",
+      fill = filer_category) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1"))
+
+
+@
+\caption{Extension rate by filing status for 10-K and 10-Q}
+\end{figure}
+
+\pagebreak
+\subsubsection{Interactions}
+\begin{figure}[h!]
+<<inter,echo=FALSE,fig.height=4,fig.width=10>>=
+par(mfrow=c(1,3))
+interaction.plot(factor(all_data_2012_10K$taxonomy_year), factor(all_data_2012_10K$year_only), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Taxonomy", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Year vs. Taxonomy")
+legend("topright",c("2014","2013", "2012"),lty=c(1,2,3), bty="n" )
+
+interaction.plot(factor(all_data_2012_10K$filer_category), factor(all_data_2012_10K$year_only), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Filer Status", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Year vs. Filer Status")
+legend("topright",c("2014","2013", "2012"),lty=c(1,2,3), bty="n" )
+
+interaction.plot(factor(all_data_2012_10K$filer_category), factor(all_data_2012_10K$taxonomy), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Filer Status", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Taxonomy vs. Filer Status")
+legend("topright",c("2014","2013", "2012", "2011", "2009"),lty=c(1,2,3,4,5), bty="n" )
+@
+\caption{Interaction plots}
+\end{figure}
+\noindent To determine if interaction terms are needed we will use the plots (Figure 9) to investigate. From the above interaction plot (the first plot) we see that interactions between year and taxonomy is not needed. The need for interactions is indicated by the lack of parallel lines. The lines in the first plot appear to be parallel enough that an interaction term between year and taxonomy is not necessary. In other words, this indicates that year does not depend on taxonomy year and vice versa. In the other two above interaction plots there is an obvious lack of parallelism thus interaction terms for taxonomy and filer status, and year and filer status will need to be included in the model. \\
+
+
+\subsection{Analysis}
+\noindent For the analysis we consider multiple linear regression with a logit transformation on the response, extension rate. The benefit of this transformation is that it takes the data constrained in the interval 0 to 1, and transforms the data to values between negative infinity and positive infinity. The data are transformed by $logit(extension\_ rate)=log(extension\_ rate/(1-extension\_ rate))$, which is the logarithm of the ratio of proportion of extended elements to proportion of non extended elements.We could define this ratio as the extension ratio.  Extension ratio will provide the same type of information as extension rate.\\
+
+\noindent Then, we proceed with multiple linear regression, using $log(extension\_ ratio)$ as the response under the assumption of normality. Interpretation is then done as usual for a log transformation of the response.\\
+
+\noindent Since 10-K are only filed once a year and 10-Q filed quarterly then 10-K summarizes information from the 10-Q filings. So the data for each will be considered two separate data sets. Thus, two models will be considered. Both models will have the structure: \\
+\begin{center}
+{\small
+$log(extension\_ ratio_i)=\beta_0 + \boldsymbol{\beta_1} taxonomy +\boldsymbol{\beta_2} year +\boldsymbol{\beta_3} filer\_ status + \boldsymbol{\beta_4} taxonomy *filer\_ status +\boldsymbol{\beta_5} year*filer\_ status +\epsilon_{i}$
+}\\[.1in]
+where $\epsilon_i \sim IIDN(0,\sigma^2)$ and $extension\_ ratio=\frac{extension\_ rate}{1-extension\_ rate}$
+\end{center}
+Note, that the bolded coefficients correspond to a vector of coefficients associated with the levels of the categories within that explanatory variable. \\
+
+\noindent Initially, logistic regression for binomial count data was used to fit the data. However, there were issues with the fit. The model resulted in standardized deviance residuals as large as 15,000. The large residuals indicated a serious lack of fit, thus a different approach was considered.
+
+\section{Results}
+When fitting a log transformed response the estimated coefficients are on an additive scale. Therefore, the coefficients can be exponentiated to get back to extension ratio. However, back transforming to the extension ratio scale the estimated coefficients are now on an multiplicative scale and are discussed in terms of changes in the median extension ratio.
+\subsection{10-K Model}
+The following model is fit using 10-K form data.
+<<10Kfiter,echo=FALSE,background="white",comment="">>=
+
+
+#filer_cat<-relevel(factor(all_data_2012_10K$filer_category), "LAF")
+
+#resp<-cbind(ee_count,se_count)
+
+#bin_fit_10K<-glm(resp~(factor(year_only) + factor(taxonomy_year)+filer_cat)^2
+                  #   ,family=quasibinomial,data=all_data_2012_10K)
+
+#fit_10K<-glm(extension_rate~factor(year_only) + factor(taxonomy_year)+filer_category +factor(year_only)*filer_category + 
+              # factor(taxonomy_year)*filer_category,family=quasibinomial,data=all_data_2012_10K)
+
+
+data_sub<-subset(all_data_2012_10K,ee_count!=0)
+filer_cat<-relevel(factor(data_sub$filer_category), "LAF")
+tax_year<-relevel(factor(data_sub$taxonomy_year),  "2011")
+fit_10K<-lm(logit(extension_rate)~factor(year_only) + factor(tax_year)+filer_cat +factor(year_only)*filer_cat + 
+               factor(tax_year)*filer_cat,data=data_sub)
+
+@
+
+<<tableer,echo=FALSE,results='asis'>>=
+xtable(summary(fit_10K), caption="Summary of fit for 10-K data with response log(Extension Ratio)")
+
+@
+
+\pagebreak
+
+
+<<oodsratio,echo=FALSE,results='asis'>>=
+
+##LAF
+or_09_1<-exp(coef(fit_10K)[4])*exp(coef(fit_10K)[1])
+or_09_2<-exp(coef(fit_10K)[1])
+or_09_3<-exp(coef(fit_10K)[5])*exp(coef(fit_10K)[1])
+or_09_4<-exp(coef(fit_10K)[6])*exp(coef(fit_10K)[1])
+or_09_5<-exp(coef(fit_10K)[7])*exp(coef(fit_10K)[1])
+##AF
+or_09_1a<-exp(coef(fit_10K)[17])*exp(coef(fit_10K)[4])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])
+or_09_2a<-exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])
+or_09_3a<-exp(coef(fit_10K)[18])*exp(coef(fit_10K)[5])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])
+or_09_4a<-exp(coef(fit_10K)[19])*exp(coef(fit_10K)[6])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])
+or_09_5a<-exp(coef(fit_10K)[20])*exp(coef(fit_10K)[7])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])
+##NAF
+
+##just fix the NAF and give more of a conclusion--change means back to medians
+##or can change back to .88 and .15 then add 2013 taxonomy
+or_09_1n<-exp(coef(fit_10K)[21])*exp(coef(fit_10K)[4])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])
+or_09_2n<-exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])
+or_09_3n<-exp(coef(fit_10K)[22])*exp(coef(fit_10K)[5])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])
+or_09_4n<-exp(coef(fit_10K)[23])*exp(coef(fit_10K)[6])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])
+or_09_5n<-exp(coef(fit_10K)[24])*exp(coef(fit_10K)[7])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])
+##SRC
+or_09_1s<-exp(coef(fit_10K)[25])*exp(coef(fit_10K)[4])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])
+or_09_2s<-exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])
+or_09_3s<-exp(coef(fit_10K)[26])*exp(coef(fit_10K)[5])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])
+or_09_4s<-exp(coef(fit_10K)[27])*exp(coef(fit_10K)[6])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])
+or_09_5s<-exp(coef(fit_10K)[28])*exp(coef(fit_10K)[7])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])
+
+or_tab<-rbind(c(or_09_1,or_09_2,or_09_3,or_09_4,or_09_5),c(or_09_1a,or_09_2a,or_09_3a,or_09_4a,or_09_5a),
+              c(or_09_1n,or_09_2n,or_09_3n,or_09_4n,or_09_5n),c(or_09_1s,or_09_2s,or_09_3s,or_09_4s,or_09_5s))
+rownames(or_tab)<-c("LAF","AF","NAF","SRC")
+colnames(or_tab)<-c("Taxonomy 2009","Taxonomy 2011","Taxonomy 2012","Taxonomy 2013","Taxonomy 2014")
+xtable(or_tab,caption="Extension ratio by taxonomy and filer status")
+
+
+#xtable(or_tab)
+oy_12_1<-exp(coef(fit_10K)[1])
+oy_12_2<-exp(coef(fit_10K)[2])*exp(coef(fit_10K)[1])
+oy_12_3<-exp(coef(fit_10K)[3])*exp(coef(fit_10K)[1])
+oy_12_1a<-exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])
+oy_12_2a<-exp(coef(fit_10K)[2])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])*exp(coef(fit_10K)[11])
+oy_12_3a<-exp(coef(fit_10K)[3])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[8])*exp(coef(fit_10K)[12])
+oy_12_1n<-exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])
+oy_12_2n<-exp(coef(fit_10K)[2])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])*exp(coef(fit_10K)[13])
+oy_12_3n<-exp(coef(fit_10K)[3])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[9])*exp(coef(fit_10K)[14])
+oy_12_1s<-exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])
+oy_12_2s<-exp(coef(fit_10K)[2])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])*exp(coef(fit_10K)[15])
+oy_12_3s<-exp(coef(fit_10K)[3])*exp(coef(fit_10K)[1])*exp(coef(fit_10K)[10])*exp(coef(fit_10K)[16])
+
+
+
+or_tab<-rbind(c(oy_12_1,oy_12_2,oy_12_3),c(oy_12_1a,oy_12_2a,oy_12_3a),
+              c(oy_12_1n,oy_12_2n,oy_12_3n),c(oy_12_1s,oy_12_2s,oy_12_3s))
+rownames(or_tab)<-c("LAF","AF","NAF","SRC")
+colnames(or_tab)<-c("2012","2013","2014")
+xtable(or_tab,caption="Extension ratio by year and filer status")
+
+@
+\pagebreak
+
+\noindent Since we are working with census data the following summary of the results do not include standard errors. However, if the model is used to predict extension ratios we need to incorporate error.\\
+
+\noindent Tables 2 and 3 give the fitted extension ratios from the model. To obtain these fitted extension ratios a linear combination is taken from the estimated coefficients from the model and then exponetiated. For example, to obtain the fitted extension ratio for AF in taxonomy 2012,
+\begin{center}
+$extension\_ ratio_{AF\_ tax2012} = exp\{ \Sexpr{coef(fit_10K)[1]} +\Sexpr{coef(fit_10K)[5]}+\Sexpr{coef(fit_10K)[8]}  + \Sexpr{coef(fit_10K)[18]} \}=0.0912.$
+\end{center}
+
+\noindent For LAF the estimated median extension ratio for taxonomy 2011 in year 2012 is 0.14. The median extension ratio for taxonomy 2009 is $\Sexpr{exp(coef(fit_10K)[4])}$ times larger than taxonomy 2011. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10K)[5])}$ times smaller than taxonomy 2011. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10K)[6])}$ times smaller than taxonomy 2011. The median extension ratio for taxonomy 2014 is $\Sexpr{exp(coef(fit_10K)[7])}$ times smaller than taxonomy 2011. Therefore, we see a decreasing trend in the extension ratio as taxonomy increases. However, the extension ratio increased in taxonomy 2014 compared to taxonomy 2013. This may be due to the small sample size of 26 in taxonomy 2014 so once more filers use taxonomy 2014 we may see the same decreasing trend. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10K)[2])}$ times larger than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10K)[3])}$ times larger than the extension ratio in year 2012. We see a slight increasing trend in extension ratio as year increases. \\
+
+\noindent For AF the estimated median extension ratio for taxonomy 2011 in year 2012 is 0.07. The median extension ratio for taxonomy 2009 is $\Sexpr{exp(coef(fit_10K)[4])*exp(coef(fit_10K)[17])}$ times smaller than taxonomy 2011. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10K)[18])*exp(coef(fit_10K)[5])}$ times larger than taxonomy 2011. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10K)[19])*exp(coef(fit_10K)[6])}$ times larger than taxonomy 2011. There is slight increasing trend in the extension ratio as taxonomy increases. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10K)[2])*exp(coef(fit_10K)[11])}$ times larger than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10K)[3])*exp(coef(fit_10K)[12])}$ times larger than the extension ratio in year 2012. From year 2012 to 2013 extension ratio increases but from years 2013 to 2014 the extension ratio stays about the same.\\
+
+\noindent For NAF the estimated median extension ratio for taxonomy 2011 in year 2012 is  0.09. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10K)[22])*exp(coef(fit_10K)[5])}$ times larger than taxonomy 2011. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10K)[23])*exp(coef(fit_10K)[6])}$ times smaller than taxonomy 2011. From taxonomy years 2011 and 2012 extension ratio is about the same, then from taxonomy 2012 to 2013 extension ratio decreases. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10K)[2])*exp(coef(fit_10K)[13])}$ times larger than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10K)[3])*exp(coef(fit_10K)[14])}$ times larger than the extension ratio in year 2012. There is an increasing trend in extension ratio as year increases.\\
+
+\noindent For SRC the estimated median extension ratio for taxonomy 2011 in year 2012 is 0.09. The median extension ratio for taxonomy 2009 is $\Sexpr{exp(coef(fit_10K)[4])*exp(coef(fit_10K)[25])}$ times larger than taxonomy 2011. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10K)[5])*exp(coef(fit_10K)[26])}$ times larger than taxonomy 2011. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10K)[6])*exp(coef(fit_10K)[27])}$ times smaller than taxonomy 2011. The median extension ratio for taxonomy 2014 is $\Sexpr{exp(coef(fit_10K)[7])*exp(coef(fit_10K)[28])}$ times smaller than taxonomy 2011. Therefore, we see a slight decreasing trend in the extension ratio as taxonomy increases. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10K)[2])*exp(coef(fit_10K)[15])}$ times larger than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10K)[3])*exp(coef(fit_10K)[16])}$ times larger than the extension ratio in year 2012. There is an increasing trend in extension ratio as year increases.\\
+
+
+\subsubsection{Model Diagnostics} 
+<<modeldia2,echo=FALSE,fig.width=10, fig.height=6,warning=FALSE,fig.cap='Diagnostic plots for the 10-K model'>>=
+par(mfrow=c(1,2))
+plot(fit_10K,which=c(1,2))
+@
+\noindent Multiple linear regression assumes the residuals are normal, independent, and identically distributed, with constant variance. 
+The residuals versus fitted values plot of the 10-K model indicates that the constant variance assumption is adequately met since the variance of the residuals appears to be constant (Figure 9). The normal Q-Q plot indicates some deviation from normality due to the points deviating from the line on the ends (Figure 9). However, since the sample size is large and multiple linear regression is robust it is reasonable to assume the normality of errors assumption is adequately met. 
+\pagebreak
+\subsection{10-Q Model}
+The following model is fit using the 10-Q form data.
+<<10KfiterQ,echo=FALSE,background="white",comment="">>=
+
+
+data_sub2<-subset(all_data_2012_10Q,ee_count!=0)
+filer_cat<-relevel(factor(data_sub2$filer_category), "LAF")
+fit_10Q<-lm(logit(extension_rate)~factor(year_only) + factor(taxonomy_year)+filer_cat +factor(year_only)*filer_cat + 
+               factor(taxonomy_year)*filer_cat,data=data_sub2)
+
+
+
+
+ 
+
+@
+
+<<tableerq,echo=FALSE,results='asis'>>=
+xtable(summary(fit_10Q), caption="Fit for 10-Q Response log(Extension Ratio)")
+#binnedplot(fitted(bin_fit_10Q),resid(bin_fit_10Q),main="Binned Residual Plot")
+@
+\pagebreak
+
+
+<<oodsratio2,echo=FALSE,results='asis'>>=
+
+##LAF
+or_09_1<-exp(coef(fit_10Q)[1])
+or_09_2<-exp(coef(fit_10Q)[4])*exp(coef(fit_10Q)[1])
+or_09_3<-exp(coef(fit_10Q)[5])*exp(coef(fit_10Q)[1])
+or_09_4<-exp(coef(fit_10Q)[6])*exp(coef(fit_10Q)[1])
+or_09_5<-exp(coef(fit_10Q)[7])*exp(coef(fit_10Q)[1])
+or_09_1a<-exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])
+or_09_2a<-exp(coef(fit_10Q)[17])*exp(coef(fit_10Q)[4])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])
+or_09_3a<-exp(coef(fit_10Q)[18])*exp(coef(fit_10Q)[5])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])
+or_09_4a<-exp(coef(fit_10Q)[19])*exp(coef(fit_10Q)[6])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])
+or_09_5a<-exp(coef(fit_10Q)[20])*exp(coef(fit_10Q)[7])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])
+or_09_1n<-exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])
+or_09_2n<-exp(coef(fit_10Q)[21])*exp(coef(fit_10Q)[4])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])
+or_09_3n<-exp(coef(fit_10Q)[22])*exp(coef(fit_10Q)[5])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])
+or_09_4n<-exp(coef(fit_10Q)[23])*exp(coef(fit_10Q)[6])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])
+or_09_5n<-exp(coef(fit_10Q)[24])*exp(coef(fit_10Q)[7])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])
+or_09_1s<-exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])
+or_09_2s<-exp(coef(fit_10Q)[25])*exp(coef(fit_10Q)[4])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])
+or_09_3s<-exp(coef(fit_10Q)[26])*exp(coef(fit_10Q)[5])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])
+or_09_4s<-exp(coef(fit_10Q)[27])*exp(coef(fit_10Q)[6])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])
+or_09_5s<-exp(coef(fit_10Q)[28])*exp(coef(fit_10Q)[7])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])
+
+or_tab<-rbind(c(or_09_1,or_09_2,or_09_3,or_09_4,or_09_5),c(or_09_1a,or_09_2a,or_09_3a,or_09_4a,or_09_5a),
+              c(or_09_1n,or_09_2n,or_09_3n,or_09_4n,or_09_5n),c(or_09_1s,or_09_2s,or_09_3s,or_09_4s,or_09_5s))
+rownames(or_tab)<-c("LAF","AF","NAF","SRC")
+colnames(or_tab)<-c("Taxonomy 2009","Taxonomy 2011","Taxonomy 2012","Taxonomy 2013","Taxonomy 2014")
+xtable(or_tab,caption="Extension ratio by taxonomy and filer status")
+
+
+#xtable(or_tab)
+oy_12_1<-exp(coef(fit_10Q)[1])
+oy_12_2<-exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[1])
+oy_12_3<-exp(coef(fit_10Q)[3])*exp(coef(fit_10Q)[1])
+oy_12_1a<-exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])
+oy_12_2a<-exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])*exp(coef(fit_10Q)[11])
+oy_12_3a<-exp(coef(fit_10Q)[3])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[8])*exp(coef(fit_10Q)[12])
+oy_12_1n<-exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])
+oy_12_2n<-exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])*exp(coef(fit_10Q)[13])
+oy_12_3n<-exp(coef(fit_10Q)[3])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[9])*exp(coef(fit_10Q)[14])
+oy_12_1s<-exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])
+oy_12_2s<-exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])*exp(coef(fit_10Q)[15])
+oy_12_3s<-exp(coef(fit_10Q)[3])*exp(coef(fit_10Q)[1])*exp(coef(fit_10Q)[10])*exp(coef(fit_10Q)[16])
+
+
+
+or_tab<-rbind(c(oy_12_1,oy_12_2,oy_12_3),c(oy_12_1a,oy_12_2a,oy_12_3a),
+              c(oy_12_1n,oy_12_2n,oy_12_3n),c(oy_12_1s,oy_12_2s,oy_12_3s))
+rownames(or_tab)<-c("LAF","AF","NAF","SRC")
+colnames(or_tab)<-c("2012","2013","2014")
+xtable(or_tab,caption="Extension ratio by year and filer status")
+
+@
+
+\noindent For LAF the estimated median extension ratio for taxonomy 2009 in year 2012 is 0.2589. The median extension ratio for taxonomy 2011 is $\Sexpr{exp(coef(fit_10Q)[4])}$ times smaller than taxonomy 2009. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10Q)[5])}$ times smaller than taxonomy 2009. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10Q)[6])}$ times smaller than taxonomy 2009. The median extension ratio for taxonomy 2014 is $\Sexpr{exp(coef(fit_10Q)[7])}$ times smaller than taxonomy 2009. Therefore, we see a decreasing trend in the extension ratio as taxonomy increases. However, the extension ratio increased in taxonomy 2014 compared to taxonomy 2013. This may be due to the small sample size of 26 in taxonomy 2014 so once more filers use taxonomy 2014 we may see the same decreasing trend. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10Q)[2])}$ times smaller than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10Q)[3])}$ times smaller than the extension ratio in year 2012. Extension ratio remains roughly constant as year increases. \\
+
+\noindent For AF the estimated median extension ratio for taxonomy 2009 in year 2012 is 0.0644. The median extension ratio for taxonomy 2011 is $\Sexpr{exp(coef(fit_10Q)[4])*exp(coef(fit_10Q)[17])}$ times smaller than taxonomy 2009. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10Q)[18])*exp(coef(fit_10Q)[5])}$ times larger than taxonomy 2009. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10Q)[19])*exp(coef(fit_10Q)[6])}$ times larger than taxonomy 2009. The median extension ratio for taxonomy 2014 is $\Sexpr{exp(coef(fit_10Q)[20])*exp(coef(fit_10Q)[7])}$ times smaller than taxonomy 2009. From taxonomy 2009 to 2012 extension ratio decreases, however, from taxonomy 2011 to 2012 extension ratio increases then remains approximately the same for taxonomy 2013. From taxonomy 2013 to 2014 the extension ratio decreases. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[11])}$ times larger than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10Q)[3])*exp(coef(fit_10Q)[12])}$ times larger than the extension ratio in year 2012. Extension ratio remains roughly constant as year increases.\\
+
+\noindent For NAF the estimated median extension ratio for taxonomy 2009 in year 2012 is  0.0791. The median extension ratio for taxonomy 2011 is $\Sexpr{exp(coef(fit_10Q)[4])*exp(coef(fit_10Q)[21])}$ times larger than taxonomy 2009. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10Q)[22])*exp(coef(fit_10Q)[5])}$ times larger than taxonomy 2009. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10Q)[23])*exp(coef(fit_10Q)[6])}$ times larger than taxonomy 2009. From taxonomy 2009 to 2012 extension ratio is approximately the same, however, from taxonomy 2011 to 2012 extension ratio increases. From taxonomy 2012 to 2013 the extension ratio decreases. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[13])}$ times larger than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10Q)[3])*exp(coef(fit_10Q)[14])}$ times larger than the extension ratio in year 2012. Extension ratio remains roughly constant as year increases.\\
+
+\noindent For SRC the estimated median extension ratio for taxonomy 2009 in year 2012 is 0.0970. The median extension ratio for taxonomy 2011 is $\Sexpr{exp(coef(fit_10Q)[4])*exp(coef(fit_10Q)[25])}$ times smaller than taxonomy 2009. The median extension ratio for taxonomy 2012 is $\Sexpr{exp(coef(fit_10Q)[5])*exp(coef(fit_10Q)[26])}$ times larger than taxonomy 2009. The median extension ratio for taxonomy 2013 is $\Sexpr{exp(coef(fit_10Q)[6])*exp(coef(fit_10Q)[27])}$ times smaller than taxonomy 2009. From taxonomy 2009 to 2012 extension ratio decreases, however, from taxonomy 2011 to 2012 extension ratio increases. From taxonomy 2012 to 2013 the extension ratio decreases. The median extension ratio for year 2013 is $\Sexpr{exp(coef(fit_10Q)[2])*exp(coef(fit_10Q)[15])}$ times larger than the extension ratio in year 2012. The median extension ratio for year 2014 is $\Sexpr{exp(coef(fit_10Q)[3])*exp(coef(fit_10Q)[16])}$ times larger than the extension ratio in year 2012. There is a slight increase in extension ratio from year 2012 to 2013 but from year 2013 to 2014 extension ratio remains roughly the same.\\
+
+
+
+\subsubsection{Model Diagnostics}
+<<modeldia,echo=FALSE,fig.width=10, fig.height=6,warning=FALSE,fig.cap='Diagnostic plots for the 10-Q model'>>=
+par(mfrow=c(1,2))
+plot(fit_10Q,which=c(1,2))
+@
+
+\noindent  
+The residuals versus fitted values plot of the 10-Q model indicates that the constant variance assumption is adequately met since the variance of the residuals appears to be constant (Figure 10). The normal Q-Q plot indicates some deviation from normality due to the points deviating from the line on the ends (Figure 10). Since the sample size is large and multiple linear regression is robust it is reasonable to assume the normality of errors assumption is adequately met. 
+
+\subsection{10-Q Model with Quarterly Data}
+\noindent Results from the 10-K and 10-Q models indicated that the extension ratio is roughly constant over the years. In the 10-Q model, the extension ratio for each year is an aggregated measure over quarters within that year. To get a better grasp of extension ratio over time each year can be broken down into quarters. Quarterly estimates of extension ratio within a year can be obtained. This could give a better indication of a trend of extension ratio over time. For example, it could be that extension ratio remains roughly the same over the first three quarters but spikes during the fourth quarter. Information on the quarterly level is lost when the data is analyzed on the year level. Therefore, the 10-Q model can be fit with a time variable that has information on the year and quarter instead of year alone.\\
+
+\noindent The 10-Q model above is fit with a time variable that indicates the year and quarter. For this paper estimates of extension ratio over years by quarters are only examined for LAF. \\
+
+<<break,echo=FALSE>>=
+Qbreaks <- as.Date(c("2012/01/01", "2012/04/01", "2012/07/01", "2012/10/01",
+                     "2013/01/01", "2013/04/01", "2013/07/01", "2013/10/01",
+                     "2014/01/01", "2014/04/01", "2014/07/01", "2014/10/01"))
+
+Qnames <- c("2012 Q1", "2012 Q2", "2012 Q3", "2012 Q4",
+            "2013 Q1", "2013 Q2", "2013 Q3", "2013 Q4",
+            "2014 Q1", "2014 Q2", "2014 Q3", "2014 Q4")
+
+all_data_2012_10Q$quarter <- Qnames[cut(as.Date(all_data_2012_10Q$filing_date), Qbreaks, right = FALSE)]
+
+@
+
+
+<<10KfiterQ2,echo=FALSE,background="white",comment="">>=
+
+
+data_sub2<-subset(all_data_2012_10Q,ee_count!=0)
+filer_cat<-relevel(factor(data_sub2$filer_category), "LAF")
+fit_10Q2<-lm(logit(extension_rate)~factor(quarter) + factor(taxonomy_year)+filer_cat +factor(quarter)*filer_cat + 
+               factor(taxonomy_year)*filer_cat,data=data_sub2)
+
+
+
+
+ 
+
+@
+
+<<tableerq2,echo=FALSE,results='asis'>>=
+#xtable(summary(fit_10Q2), caption="Fit for 10-Q Response log(Extension Ratio)")
+#binnedplot(fitted(bin_fit_10Q),resid(bin_fit_10Q),main="Binned Residual Plot")
+@
+
+<<oodsratio3,echo=FALSE,results='asis'>>=
+
+##LAF
+or_09_1<-exp(coef(fit_10Q2)[1])
+or_09_2<-exp(coef(fit_10Q2)[2])*exp(coef(fit_10Q2)[1])
+or_09_3<-exp(coef(fit_10Q2)[3])*exp(coef(fit_10Q2)[1])
+or_09_4<-exp(coef(fit_10Q2)[4])*exp(coef(fit_10Q2)[1])
+or_09_5<-exp(coef(fit_10Q2)[5])*exp(coef(fit_10Q2)[1])
+or_09_6<-exp(coef(fit_10Q2)[6])*exp(coef(fit_10Q2)[1])
+or_09_7<-exp(coef(fit_10Q2)[7])*exp(coef(fit_10Q2)[1])
+or_09_8<-exp(coef(fit_10Q2)[8])*exp(coef(fit_10Q2)[1])
+or_09_9<-exp(coef(fit_10Q2)[9])*exp(coef(fit_10Q2)[1])
+or_09_10<-exp(coef(fit_10Q2)[10])*exp(coef(fit_10Q2)[1])
+
+
+
+or_tab<-rbind(c(or_09_1,or_09_2,or_09_3,or_09_4,or_09_5,or_09_6,or_09_7,or_09_8,or_09_9,or_09_10))
+rownames(or_tab)<-c("LAF")
+colnames(or_tab)<-c(Qnames[1:10])
+xtable(or_tab,caption="Extension ratio by Year and Quarter")
+
+
+
+@
+\noindent The lowest extension ratios occur during the first quarter, in 2012 the estimated extension ratio is .22, 2013 it is .22, and in 2014 it is .23. Extension ratio slightly increases as quarter increases. (Table 7) The ratio is the highest during the fourth quarter, in 2012 extension ratio is estimated to be .29, in 2013 it is .3, and we do not have data on the fourth quarter for 2014. (Table 7) For future analysis, estimates for extension ratio over years by quarters should be obtained for AF, NAF , and SRC. 
+
+\section{Conclusion}
+The factors which impact extension rate is form type, year, taxonomy year, filer status, and the interactions between year, taxonomy, and filer status. With the 10-K data, we conclude that for all four filer status types there is an slight increasing trend in extension ratio as year increases. In addition, for LAF and SRC there is a decreasing trend in extension ratio as taxonomy year increases. With the 10-Q data, we conclude that for LAF there is a decreasing trend in extension ratio as taxonomy year increases. However, for AF and NAF extension ratio increases as taxonomy year increases. For SRC extension ratio is approximately the same for all taxonomy years. In addition, for all four filer status types as year increases extension ratio remains approximately constant. However, when year is broken down by quarter extension ratio is the lowest during the first quarter and increases the remaining three quarters.\\
+
+\noindent The only factor that is associated with decreasing extension ratios is taxonomy. This would be expected since the SEC attempts to improve upon the last taxonomy when constructing a newer version. In addition, there have been claims that filers are ``learning" over time. If filers were learning over time we would expect extension ratios to be decreasing as the years increase regardless of taxonomy. However, this is not the case as year increases extension ratio is either increasing or remaining constant. \\
+
+\noindent To reduce extension rates, careful consideration of taxonomy is required. Furthermore, to reduce extension rates when filing, the most recent version of the taxonomy should be used. The most recent taxonomy contain more and improved standard elements, thus filers are less likely to make extensions. For instance, a filer that uses the most recent taxonomy can tag an element with a standard element, whereas previously they would have to extend the same element if an older taxonomy version was used. \\
+
+\noindent Since extension ratio is remaining close to constant as year increases some intervention may be needed. Intervention should occur during the first quarter since extension ratios are the lowest during this time, and will only increase the remaining three quarters. Possible intervention could be making the process of validating extensions stricter or requiring companies to use an outside source such as Wdesk (Workiva's filing product) to create filings. In regards to filer status, LAF tend to have the higher extension ratios compared to the other 3 filer categories. Therefore, intervention could be piloted just on LAF to see if intervention is effective.
+
+\subsection{Scope of Inference}
+This is an observational study because explanatory variable values were not randomly assigned to treatments (and could not be). Therefore, it can only be stated that changes in the explanatory variable were associated with changes in the odds of an extension. Data was collected from all publicly traded companies in the United States (a census of filings from publicly traded companies in US) therefore inferences apply to all publicly traded companies United States.
+\section{Future Analysis}
+As mentioned in section 4.3 estimates for extension ratio over years by quarters should be obtained for AF, NAF , and SRC. The LAF estimates showed an increasing trend of quarter increases, however, we need to investigate the trends across the other categories. In addition, we can investigate the effects of using software such as Wdesk on extension ratio. If filers using software tend to have lower extension ratios then the SEC could make a requirement to use a software to reduce extension rates.\\
+
+\noindent Results from the 10-K and 10-Q models indicated that the extension ratio across all four filer categories is roughly the same. Within filer category we can separate filers industries indicated by SIC. Extension ratio for each filer category is an aggregated measure over all SICs (or over all industries). To get a better grasp of extension ratio over filer categories each category can be broken down into industries indicated by SIC. Estimates of extension ratio by industry with filer category can be obtained. This could give a better indication of which type of industries tend to make more extension than others. \\
+
+\noindent All the analysis was performed on data submitted in the year 2014. As filings are coming in, analysis of data from 2015 and 2014 10-K will need to be done. Since the 2014 taxonomy had only 26 observations more recent data (which will hopefully have more observations for the 2014 taxonomy) will provide better model estimates for this taxonomy.
+
+\newpage
+\section{Acknowledgments}
+Dr. Steve Cherry - Writing Project Chair\\
+Allen Bross, M.S. - Data Analyst, Workiva\\
+Susan Yount -Workiva\\
+Workiva\\
+
+
+\begin{thebibliography}{1}
+
+\bibitem{sleuth} Fred Ramsey and Daniel Schafer. {\it The Statistical Sleuth: A Course in Methods of Data Analysis}. Duxbury Press; 2 edition, 2002.
+
+\bibitem{gelman} Andrew Gelman and Jennifer Hill. {\it Data Analysis Using Regression and Multilevel/Hierarchical Models.},Cambridge University Press; 1 edition (December 18, 2006).
+
+\bibitem{web} XBRL US GAAP Taxonomy Preparers Guide. {\it http://xbrl.us/preparersguide/Pages/default.aspx}.
+
+\bibitem{web2} SIC code / NAICS code. {\it The Leader in SIC and NAICS Codes}. {\it http://siccode.com/en/}.
+
+
+\end{thebibliography}
+\bibliographystyle{standard}
+\bibliography{exten_wp}
+
+
+
+
+\end{document}
