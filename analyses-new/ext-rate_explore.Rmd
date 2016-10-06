@@ -1,0 +1,287 @@
+---
+title: "Familiarization with project"
+output: html_document
+---
+
+This document is for me (Katie Banner) to familarize myself with the work Lauren did investigating the trends over time in extension rate filings. 
+
+```{r setup, include=FALSE}
+# load the packages Lauren used
+library(knitr)
+opts_chunk$set(fig.width = 5, fig.height = 4,
+               out.width='\\linewidth', 
+               dev='pdf', concordance = TRUE)
+options(replace.assign = TRUE, width = 112, digits = 4, 
+        max.print = 1000, show.signif.stars = FALSE)
+library(xtable)
+library(foreign)
+library(arm)
+library(ggplot2)
+library(nortest)
+library(nlme)
+library(lattice)
+library(lme4)
+library(R2jags)
+library(gee)
+```
+
+## Data cleaning 
+
+- `ee_count` extended elements 
+- `ae_count` total elements $\implies$ `se_count` = `ae_count - se_count`
+- Recodes to shorten names of filer status (filer category)
+- Originally 434 unique 4-digit SIC codes - recoded to
+
+
+```{r data-readin, echo = FALSE, results='hide'}
+## without face statements
+all_data <- read.csv("../data/all_without_table_codes.csv")
+
+## ae_count 
+all_data$extension_rate<-with(all_data, ee_count/ae_count) 
+all_data$se_count<-with(all_data, ae_count-ee_count)
+
+## data
+all_data$filer_category<-ifelse(all_data$filer_category=="Large Accelerated Filer", "LAF",
+                                ifelse(all_data$filer_category=="Large Accelerated\nFiler", "LAF",
+                                  ifelse(all_data$filer_category=="Accelerated Filer","AF",
+                                         ifelse(all_data$filer_category=="Non-accelerated Filer","NAF",
+                                                ifelse(all_data$filer_category=="Smaller Reporting Company","SRC",0)))))
+
+
+## label SIC by first two integers
+
+SIC <- sprintf("%04d", all_data$standard_industry_code)
+
+
+##eventually make a function. 
+#SIC_rename<-function(SIC){
+
+names <- c(rep("AFF" , 9), rep("min" , 5),
+           rep("const" , 3), rep("manu" , 20),
+           rep("TPB" , 10), rep("WT",2),
+           rep("RT",8) , rep("FIR",8),
+           rep("serv",20) , rep("PA",9),
+           rep("other",5))
+
+AFF_code <- sprintf("%02d", c(01,02,03,04,05,06,07,08,09))
+min_code <- c(10:14)
+const_code <- c(15:17)
+manu_code <- c(20:39)
+TPB_code <- c(40:49)
+WT_code <- c(50:51)
+RT_code <- c(52:59)
+FIR_code <- c(60:67)
+serv_code <- c(70:89)
+PA_code <- c(91:99)
+other_code <- sprintf("%02d", c(18,19,68,69,-1))
+
+codes <- c(AFF_code, min_code, const_code, manu_code, 
+           TPB_code, WT_code, RT_code, FIR_code, serv_code, 
+           PA_code, other_code)
+
+code_mat <- matrix(cbind(names, codes),
+                   nrow = length(codes), ncol = 2)
+n <- length(SIC)
+                    
+
+for (i in 1:n) {
+  split <- as.numeric(substr(as.character(SIC[i]),
+                             start = 1, stop = 2))
+  match_index <- match(split, code_mat[,2], nomatch = 0)
+  
+  SIC[i]<- ifelse( match_index == 0,"other",
+                    code_mat[match_index,1])
+ }
+  
+
+all_data$SIT <- SIC
+
+##subset data by form type 10K and 10Q
+all_data_10K <- subset(all_data,form_type=="10-K")
+all_data_10Q <- subset(all_data,form_type=="10-Q")
+
+all_data_2012_10K<-subset(all_data_10K, year_only >= 2012)
+all_data_2012_10Q<-subset(all_data_10Q,year_only >= 2012)
+
+all_data_1213_10K<-subset(all_data_10K, 
+                          year_only == 2012 | year_only== 2013)
+all_data_1213_10Q<-subset(all_data_10Q,
+                          year_only == 2012 | year_only== 2013)
+
+
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10K 
+all_data_LAF<- subset(all_data_2012_10K, filer_category=="LAF")
+all_data_AF<- subset(all_data_2012_10K, filer_category=="AF")
+all_data_NAF<- subset(all_data_2012_10K, filer_category=="NAF")
+all_data_SRC<- subset(all_data_2012_10K, filer_category=="SRC")
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10Q
+all_data_LAFQ<- subset(all_data_2012_10Q, filer_category=="LAF")
+all_data_AFQ<- subset(all_data_2012_10Q, filer_category=="AF")
+all_data_NAFQ<- subset(all_data_2012_10Q, filer_category=="NAF")
+all_data_SRCQ<- subset(all_data_2012_10Q, filer_category=="SRC")
+
+
+
+###with face statements
+all_data_fs <- read.csv("../data/all_with_table_codes.csv")
+all_data_fs$extension_rate<-with(all_data_fs, ee_count/ae_count) 
+all_data_fs$se_count<-with(all_data_fs, ae_count-ee_count)
+
+##data
+all_data_fs$filer_category<-ifelse(all_data_fs$filer_category=="Large Accelerated Filer", "LAF",
+                                ifelse(all_data_fs$filer_category=="Large Accelerated\nFiler", "LAF",
+                                  ifelse(all_data_fs$filer_category=="Accelerated Filer","AF",
+                                         ifelse(all_data_fs$filer_category=="Non-accelerated Filer","NAF",
+                                                ifelse(all_data_fs$filer_category=="Smaller Reporting Company","SRC",0)))))
+
+
+SIC<-sprintf("%04d", all_data_fs$standard_industry_code)
+##eventually make a function. 
+#SIC_rename<-function(SIC){
+                   names<-c(rep("AFF",9),rep("min",5),rep("const",3),rep("manu",20),rep("TPB",10)
+                              ,rep("WT",2),rep("RT",8),rep("FIR",8),rep("serv",20),rep("PA",9),rep("other",5))
+                    AFF_code<-sprintf("%02d", c(01,02,03,04,05,06,07,08,09))
+                    min_code<-c(10:14)
+                    const_code<-c(15:17)
+                    manu_code<-c(20:39)
+                    TPB_code<-c(40:49)
+                    WT_code<-c(50:51)
+                    RT_code<-c(52:59)
+                    FIR_code<-c(60:67)
+                    serv_code<-c(70:89)
+                    PA_code<-c(91:99)
+                    other_code<-sprintf("%02d", c(18,19,68,69,-1))
+                    codes<-c(AFF_code,min_code,const_code,manu_code,TPB_code,WT_code,RT_code,FIR_code,serv_code,PA_code,other_code)
+                    code_mat<-matrix(cbind(names,codes),nrow=length(codes),ncol=2)
+                    n<-length(SIC)
+                    
+
+                      for(i in 1:n){
+                      split<-as.numeric(substr(as.character(SIC[i]),start=1,stop=2))
+                      match_index<-match(split,code_mat[,2], nomatch=0)
+                     ifelse(match_index==0,SIC[i]<-"other",
+                      SIC[i]<-code_mat[match_index,1])
+                     #SIC[i]<-code_mat[match_index,1]
+                      }
+  
+#}
+
+all_data_fs$SIT<-SIC
+##subset data by form type 10K and 10Q
+all_data_10Kfs<-subset(all_data_fs,form_type=="10-K")
+all_data_10Qfs<-subset(all_data_fs,form_type=="10-Q")
+
+
+
+
+all_data_2012_10Kfs<-subset(all_data_10Kfs,year_only >= 2012)
+all_data_2012_10Qfs<-subset(all_data_10Qfs,year_only >= 2012)
+all_data_1213_10Kfs<-subset(all_data_10Kfs,year_only == 2012 | year_only== 2013)
+all_data_1213_10Qfs<-subset(all_data_10Qfs,year_only == 2012 | year_only== 2013)
+
+
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10K 
+all_data_LAFfs<- subset(all_data_2012_10Kfs, filer_category=="LAF")
+all_data_AFfs<- subset(all_data_2012_10Kfs, filer_category=="AF")
+all_data_NAFfs<- subset(all_data_2012_10Kfs, filer_category=="NAF")
+all_data_SRCfs<- subset(all_data_2012_10Kfs, filer_category=="SRC")
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10Q
+all_data_LAFQfs<- subset(all_data_2012_10Qfs, filer_category=="LAF")
+all_data_AFQfs<- subset(all_data_2012_10Qfs, filer_category=="AF")
+all_data_NAFQfs<- subset(all_data_2012_10Qfs, filer_category=="NAF")
+all_data_SRCQfs<- subset(all_data_2012_10Qfs, filer_category=="SRC")
+
+foot_notes_data <- read.csv("../data/foot_notes_data.csv")
+foot_notes_data$extension_rate<-with(foot_notes_data, ee_count/ae_count) 
+foot_notes_data$se_count<-with(all_data, ae_count-ee_count)
+
+##data
+foot_notes_data$filer_category<-ifelse(foot_notes_data$filer_category=="Large Accelerated Filer", "LAF",
+                                ifelse(foot_notes_data$filer_category=="Large Accelerated\nFiler", "LAF",
+                                  ifelse(foot_notes_data$filer_category=="Accelerated Filer","AF",
+                                         ifelse(foot_notes_data$filer_category=="Non-accelerated Filer","NAF",
+                                                ifelse(foot_notes_data$filer_category=="Smaller Reporting Company","SRC",0)))))
+
+
+
+
+##label SIC by first two integers
+SIC<-sprintf("%04d", foot_notes_data$standard_industry_code)
+##eventually make a function. 
+#SIC_rename<-function(SIC){
+                   names<-c(rep("AFF",9),rep("min",5),rep("const",3),rep("manu",20),rep("TPB",10)
+                              ,rep("WT",2),rep("RT",8),rep("FIR",8),rep("serv",20),rep("PA",9),rep("other",5))
+                    AFF_code<-sprintf("%02d", c(01,02,03,04,05,06,07,08,09))
+                    min_code<-c(10:14)
+                    const_code<-c(15:17)
+                    manu_code<-c(20:39)
+                    TPB_code<-c(40:49)
+                    WT_code<-c(50:51)
+                    RT_code<-c(52:59)
+                    FIR_code<-c(60:67)
+                    serv_code<-c(70:89)
+                    PA_code<-c(91:99)
+                    other_code<-sprintf("%02d", c(18,19,68,69,-1))
+                    codes<-c(AFF_code,min_code,const_code,manu_code,TPB_code,WT_code,RT_code,FIR_code,serv_code,PA_code,other_code)
+                    code_mat<-matrix(cbind(names,codes),nrow=length(codes),ncol=2)
+                    n<-length(SIC)
+                    
+
+                      for(i in 1:n){
+                      split<-as.numeric(substr(as.character(SIC[i]),start=1,stop=2))
+                      match_index<-match(split,code_mat[,2], nomatch=0)
+                     ifelse(match_index==0,SIC[i]<-"other",
+                      SIC[i]<-code_mat[match_index,1])
+                     #SIC[i]<-code_mat[match_index,1]
+                      }
+  
+#}
+
+foot_notes_data$SIT<-SIC
+
+#SIC_rename(all_data$standard_industry_code)
+
+##subset data by form type 10K and 10Q
+fn_data_10K<-subset(foot_notes_data,form_type=="10-K")
+fn_data_10Q<-subset(foot_notes_data,form_type=="10-Q")
+
+
+
+
+fn_data_2012_10K<-subset(fn_data_10K,year_only >= 2012)
+fn_data_2012_10Q<-subset(fn_data_10Q,year_only >= 2012)
+fn_data_1213_10K<-subset(fn_data_10K,year_only == 2012 | year_only== 2013)
+fn_data_1213_10Q<-subset(fn_data_10Q,year_only == 2012 | year_only== 2013)
+
+
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10K 
+fn_data_LAF<- subset(fn_data_2012_10K, filer_category=="LAF")
+fn_data_AF<- subset(fn_data_2012_10K, filer_category=="AF")
+fn_data_NAF<- subset(fn_data_2012_10K, filer_category=="NAF")
+fn_data_SRC<- subset(fn_data_2012_10K, filer_category=="SRC")
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10Q
+fn_data_LAFQ<- subset(fn_data_2012_10Q, filer_category=="LAF")
+fn_data_AFQ<- subset(fn_data_2012_10Q, filer_category=="AF")
+fn_data_NAFQ<- subset(fn_data_2012_10Q, filer_category=="NAF")
+fn_data_SRCQ<- subset(fn_data_2012_10Q, filer_category=="SRC")
+
+
+#test<-subset(all_data_2012_10K,all_data_2012_10K$year==2012 & all_data_2012_10K$filer_category=="LAF")
+
+
+#all_data_2012_10K$extension_rate<-remove_outliers(all_data_2012_10K$extension_rate)
+all_data_2012_10Kp<-all_data_2012_10K
+
+all_data_2012_10K<-all_data_2012_10K[-which(all_data_2012_10K$taxonomy==2009 & all_data_2012_10K$filer_category=="NAF"),]
+
+
+```
+
+
