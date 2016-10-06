@@ -1,0 +1,177 @@
+\documentclass{article}
+\usepackage{graphicx, verbatim, ulem, fancyvrb, setspace,xspace,color,subcaption}
+\usepackage[utf8]{inputenc}
+\setlength{\tabcolsep}{1pt}
+
+\usepackage[margin=1in]{geometry}
+
+\title{Extension Analysis}
+\author{MIA}
+\date{Fall 2014}
+
+
+
+\usepackage{Sweave}
+\begin{document}
+\input{logit_analysis-concordance}
+\definecolor{orange}{rgb}{1,0.5,0}
+\definecolor{dgreen}{rgb}{0,0.5,0}
+
+
+
+
+
+
+
+
+
+
+\maketitle
+
+\tableofcontents
+
+\newpage
+\section{Introduction}
+\noindent One of the basic features and strengths of XBRL is the ability to create custom elements, or extensions. In the SEC implementation of XBRL, filers may create extensions within certain guidelines. However, it has been observed that filers create extensions which are materially identical to existing standard elements. Unnecessary extensions impair the usability of XBRL data by introducing meaningless variability.\\
+\noindent Several studies have shown that approximately 50\% of extensions are unnecessary, while a recent SEC Staff Observation from the SEC found that a significant number of extensions are reasonable and appropriate. Further, the SEC has stated that extension rates will be reduced as filers learn more about XBRL.
+
+
+
+\section{Objectives and Questions}
+Objectives of this analysis are:
+\begin{itemize}
+\item To analyze extension rates in XBRL filings across various dimensions to discover trends in rates over time. 
+\item To provide a framework for identifying unnecessary extensions, analyze a sample of filings and compare to earlier research findings regarding the rate of unnecessary extensions.
+\item To recommend actions to reduce the rate of unnecessary extensions.
+\end{itemize}
+
+\noindent Questions:
+\begin{itemize}
+\item What are the general demographics of extensions?\\
+What factors have a strong association with extensions?
+\item What is the impact of extensions on the data set?
+\item What is the impact of unnecessary extensions on the data set?
+\item Are extension rates changing over time?
+\item Is there any indication that filers are ‘learning’ over time?
+\end{itemize}
+
+\section {Extensions in filings}
+\subsection {Definition of extensions}
+
+
+
+\section{Factors which impace extension rates}
+\subsection{Effect of taxonomy version on extensions}
+\subsubsection{Entire population by filing year}
+\subsubsection{By taxonomy version}
+\subsubsection{BY SEC filing status and filing year}
+
+\subsubsection{Face financial statements}
+\subsubsection{By taxonomy version}
+\subsubsection{BY SEC filing status and filing year}
+
+\subsection{Effect of filing size on extensions}
+\subsubsection{Number of facts in filings by filing year}
+\subsubsection{Number of facts in filings by SEC filing status and filing year}
+
+\section{Effect of extensions on data set}
+
+\section{Identifying unnecessary extensions}
+\subsection{Method}
+
+\subsection{Sample}
+\subsubsection{Line Items}
+\subsubsection{Axes}
+
+\subsection{Extrapolation}
+\subsection{Effect of removing unnecessary extensions}
+
+\section{Reducing the rate of unnecessary extensions}
+
+\section{Conclusion}
+
+
+
+
+
+
+
+
+\section{Data Collection and Study Design}
+\subsection{Data Collection}
+Data was collected from all public companies who are required to file through the SEC. The data was obtained from the XBRL database by using PostgreSQL queries. The code can be provided upon request. 
+\subsection{Study Design}
+This is an observational study so inferences are restricted associations for the sample examined. The variables considered in this study were:\\
+\begin{itemize}
+\item Creation Software: Software used to create filing.
+\item Standard Industry Code:
+\item Filer status: Four categories, large accelerated filers, accelerated filers, non accelerated filers, and small reporting companies.
+\item Reference number:
+\item Company Name: Name of company
+\item Year: Year of filing 
+\item Taxonomy: Taxonomy which the company filed under. 
+\item Extension rate: extended element over the total number of elements (extended element + standard element). 
+\item Form Type: If filing a 10K or 10Q.
+
+\end{itemize}
+\section{Analysis}
+\noindent All the analysis below are from years 2012-2014 unless specified. \\
+
+\subsection{Preliminary Plots}
+
+
+
+\pagebreak
+
+\subsubsection{Interactions}
+
+\noindent Interaction terms are needed for this model since taxonomy depends on year and vice versa. To determine if an interaction between taxonomy and filer status or year and filer status is needed we will use the plots above to investigate. From the above interaction plot (the first plot) we see that interactions between year and taxonomy is needed. The need for interactions is indicated by the lack of overlap in terms of mean extension rate. For example the line for year 2012 and taxonomy 2012 intersect at about .12 mean extension rate, whereas, the line for year 2013 and taxonomy 2012 intersect at about .15. If there was no need for interaction we would expect at the intersections for both lines at taxonomy 2012 to have the same mean extension rate. Since they do no we need to include interactions between year and taxonomy in the model. In the other two above interaction plots we also see we need an interaction between taxonomy and filer status, and between year and filer status. \\
+
+\subsection{First Model}
+\noindent The response, extension rate, is a binomial count out of a total. Typically, a logistic regression would be fitted, however, we would like to treat the response as a ``continuous" proportion.\\
+Since extension rate can only take on values between 0 and 1 a transformation is needed before multiple linear regression is performed. An appropriate transformation would be the logit transformation,
+\begin{center}
+$logit(extension\_ rate)=log(\frac{extension\_ rate}{1-extension\_ rate})$.
+\end{center}
+Which is the log of the ratio of the proportion of extensions over the proportion of non-extensions. This ratio will be referred to as the extension ratio, $extension\_ ratio = \frac{p}{1-p}$, where $p$ is the extension rate (proportion of extensions). The extension ratio will provide the same information as extension rate does. For example, an increase in extension ratio implies an increase in extension rate. Then, one could proceed with multiple linear regression, using $log(extension\_ ratio)$ as the response under the assumption of normality. Interpretation is then done as usual for a log transformation of the response. \\
+Using extension ratio as the response is advantageous since we can directly interpret coefficients, whereas logistic regression with extension rate as the response is more complicated. \\
+Initially, the predictors chosen to use in the model are year (as a categorical variable), taxonomy (as a categorical variable), and filer status. The data set that is used to fit the model is a subset of the data (described in section 3.1) from years 2012 and up. The choice of considering data on years 2012 and up was due the requirement of filers to file with XBRL in the year 2012.  
+
+
+
+
+\subsubsection{Fit in R}
+{\small
+\begin{Schunk}
+\begin{Sinput}
+> filer_cat<-relevel(factor(all_data_2012_10K$filer_category), "LAF")
+> fit_10K<-lm(log_er~(factor(year_only) + factor(taxonomy_year)+filer_cat)^2
++                      ,data=all_data_2012_10K)
+> bin_fit_10K<-glm(extension_rate~(factor(year_only) + factor(taxonomy_year)+filer_cat)^2
++                      ,family=quasibinomial,data=all_data_2012_10K)
+> conf_int<-confint(bin_fit_10K)
+> getSlope.SE <-  function(yr){
++    #fit <- update(vote.fit1,  subset = year==yr & presvote <3)
++    summary(bin_fit_10K)$coef[2,1:2]
++  }
+> pres.years <- c(2012,2013,2014)
+> output <- sapply( pres.years ,getSlope.SE)
+> plot (x=c(2012,2013,2014), y=summary(bin_fit_10K)$coef[1:3,1], xlim=c(2012,2014), 
++       mgp=c(2,.5,0), pch=20, main="Income Effects Over Years", ylab="Estimate", xlab="Year")
+> segments(x0=c(2012,2013,2014),x1=c(2012,2013,2014), y0= summary(bin_fit_10K)$coef[1:3,1]-summary(bin_fit_10K)$coef[1:3,2],y1= summary(bin_fit_10K)$coef[1:3,1]+summary(bin_fit_10K)$coef[1:3,2])
+> abline (h=0,lwd=.5, lty=2)
+> getSlope.SE <-  function(yr){
++   # fit <- update(vote.fit1,  subset = year==yr & presvote <3)
++    summary(bin_fit_10K)$coef[1:3,1:2]
++  }
+> pres.years <- c(2012,2013,2014)
+> output <- sapply( pres.years ,getSlope.SE)
+> plot (pres.years, output[1,], xlim=c(2012,2014), mgp=c(2,.5,0), pch=20, main="Income Effects Over Years", ylab="Estimate", xlab="Year")
+> segments(x0=pres.years,x1=pres.years, y0= output[1,]-output[2,],y1= output[1,]+output[2,])
+> abline (h=0,lwd=.5, lty=2)
+> 
+\end{Sinput}
+\end{Schunk}
+}
+\pagebreak
+\subsubsection{Model Coefficients}

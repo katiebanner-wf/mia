@@ -1,0 +1,534 @@
+\documentclass{article}
+\usepackage{graphicx, verbatim, ulem, fancyvrb, setspace,xspace,color,subcaption}
+\usepackage[utf8]{inputenc}
+\setlength{\tabcolsep}{1pt}
+
+\usepackage[margin=1in]{geometry}
+
+\title{Extension Analysis}
+\author{MIA}
+\date{Fall 2014}
+
+
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+\definecolor{orange}{rgb}{1,0.5,0}
+\definecolor{dgreen}{rgb}{0,0.5,0}
+<<setup, include=FALSE, cache=FALSE,echo=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width=5, fig.height=4, out.width='\\linewidth', dev='pdf', concordance=TRUE)
+options(replace.assign=TRUE,width=112, digits = 6, max.print=1000,
+        show.signif.stars = TRUE)
+require(xtable)
+require(foreign)
+require(arm)
+require(ggplot2)
+require(nlme)
+require(lattice)
+require(lme4)
+
+@
+
+
+
+
+
+
+<<data,echo=FALSE>>=
+
+
+##without face statements
+all_data <- read.csv("../data/all_without_table_codes.csv")
+all_data$extension_rate <- with(all_data, ee_count/ae_count) 
+all_data$se_count<-with(all_data, ae_count-ee_count)
+all_data$extension_rate<-ifelse(all_data$extension_rate== 0, 0.000001, all_data$extension_rate)
+all_data$extension_ratio<- with(all_data,(extension_rate)/(1-extension_rate))
+all_data$log_er<- with(all_data,log((extension_ratio)))
+
+
+
+##data
+all_data$filer_category<-ifelse(all_data$filer_category=="Large Accelerated Filer", "LAF",
+                                ifelse(all_data$filer_category=="Large Accelerated\nFiler", "LAF",
+                                  ifelse(all_data$filer_category=="Accelerated Filer","AF",
+                                         ifelse(all_data$filer_category=="Non-accelerated Filer","NAF",
+                                                ifelse(all_data$filer_category=="Smaller Reporting Company","SRC",0)))))
+
+
+
+
+##label SIC by first two integers
+SIC<-sprintf("%04d", all_data$standard_industry_code)
+##eventually make a function. 
+#SIC_rename<-function(SIC){
+                   names<-c(rep("AFF",9),rep("min",5),rep("const",3),rep("manu",20),rep("TPB",10)
+                              ,rep("WT",2),rep("RT",8),rep("FIR",8),rep("serv",20),rep("PA",9),rep("other",5))
+                    AFF_code<-sprintf("%02d", c(01,02,03,04,05,06,07,08,09))
+                    min_code<-c(10:14)
+                    const_code<-c(15:17)
+                    manu_code<-c(20:39)
+                    TPB_code<-c(40:49)
+                    WT_code<-c(50:51)
+                    RT_code<-c(52:59)
+                    FIR_code<-c(60:67)
+                    serv_code<-c(70:89)
+                    PA_code<-c(91:99)
+                    other_code<-sprintf("%02d", c(18,19,68,69,-1))
+                    codes<-c(AFF_code,min_code,const_code,manu_code,TPB_code,WT_code,RT_code,FIR_code,serv_code,PA_code,other_code)
+                    code_mat<-matrix(cbind(names,codes),nrow=length(codes),ncol=2)
+                    n<-length(SIC)
+                    
+
+                      for(i in 1:n){
+                      split<-as.numeric(substr(as.character(SIC[i]),start=1,stop=2))
+                      match_index<-match(split,code_mat[,2], nomatch=0)
+                     ifelse(match_index==0,SIC[i]<-"other",
+                      SIC[i]<-code_mat[match_index,1])
+                     #SIC[i]<-code_mat[match_index,1]
+                      }
+  
+#}
+
+all_data$SIT<-SIC
+
+#SIC_rename(all_data$standard_industry_code)
+
+##subset data by form type 10K and 10Q
+all_data_10K<-subset(all_data,form_type=="10-K")
+all_data_10Q<-subset(all_data,form_type=="10-Q")
+
+
+
+
+all_data_2012_10K<-subset(all_data_10K,year_only >= 2012)
+all_data_2012_10Q<-subset(all_data_10Q,year_only >= 2012)
+all_data_1213_10K<-subset(all_data_10K,year_only == 2012 | year_only== 2013)
+all_data_1213_10Q<-subset(all_data_10Q,year_only == 2012 | year_only== 2013)
+
+
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10K 
+all_data_LAF<- subset(all_data_2012_10K, filer_category=="LAF")
+all_data_AF<- subset(all_data_2012_10K, filer_category=="AF")
+all_data_NAF<- subset(all_data_2012_10K, filer_category=="NAF")
+all_data_SRC<- subset(all_data_2012_10K, filer_category=="SRC")
+##subset data by filer categor. 
+##Four different models for filer categ. and for form 10Q
+all_data_LAFQ<- subset(all_data_2012_10Q, filer_category=="LAF")
+all_data_AFQ<- subset(all_data_2012_10Q, filer_category=="AF")
+all_data_NAFQ<- subset(all_data_2012_10Q, filer_category=="NAF")
+all_data_SRCQ<- subset(all_data_2012_10Q, filer_category=="SRC")
+
+
+
+@
+
+
+
+
+\maketitle
+
+\tableofcontents
+
+\newpage
+\section{Introduction}
+\noindent One of the basic features and strengths of XBRL is the ability to create custom elements, or extensions. In the SEC implementation of XBRL, filers may create extensions within certain guidelines. However, it has been observed that filers create extensions which are materially identical to existing standard elements. Unnecessary extensions impair the usability of XBRL data by introducing meaningless variability.\\
+\noindent Several studies have shown that approximately 50\% of extensions are unnecessary, while a recent SEC Staff Observation from the SEC found that a significant number of extensions are reasonable and appropriate. Further, the SEC has stated that extension rates will be reduced as filers learn more about XBRL.
+
+
+
+\section{Objectives and Questions}
+Objectives of this analysis are:
+\begin{itemize}
+\item To analyze extension rates in XBRL filings across various dimensions to discover trends in rates over time. 
+\item To provide a framework for identifying unnecessary extensions, analyze a sample of filings and compare to earlier research findings regarding the rate of unnecessary extensions.
+\item To recommend actions to reduce the rate of unnecessary extensions.
+\end{itemize}
+
+\noindent Questions:
+\begin{itemize}
+\item What are the general demographics of extensions?\\
+What factors have a strong association with extensions?
+\item What is the impact of extensions on the data set?
+\item What is the impact of unnecessary extensions on the data set?
+\item Are extension rates changing over time?
+\item Is there any indication that filers are ‘learning’ over time?
+\end{itemize}
+
+\section {Extensions in filings}
+\subsection {Definition of extensions}
+
+
+
+\section{Factors which impace extension rates}
+\subsection{Effect of taxonomy version on extensions}
+\subsubsection{Entire population by filing year}
+\subsubsection{By taxonomy version}
+\subsubsection{BY SEC filing status and filing year}
+
+\subsubsection{Face financial statements}
+\subsubsection{By taxonomy version}
+\subsubsection{BY SEC filing status and filing year}
+
+\subsection{Effect of filing size on extensions}
+\subsubsection{Number of facts in filings by filing year}
+\subsubsection{Number of facts in filings by SEC filing status and filing year}
+
+\section{Effect of extensions on data set}
+
+\section{Identifying unnecessary extensions}
+\subsection{Method}
+
+\subsection{Sample}
+\subsubsection{Line Items}
+\subsubsection{Axes}
+
+\subsection{Extrapolation}
+\subsection{Effect of removing unnecessary extensions}
+
+\section{Reducing the rate of unnecessary extensions}
+
+\section{Conclusion}
+
+
+
+
+
+
+
+
+\section{Data Collection and Study Design}
+\subsection{Data Collection}
+Data was collected from all public companies who are required to file through the SEC. The data was obtained from the XBRL database by using PostgreSQL queries. The code can be provided upon request. 
+\subsection{Study Design}
+This is an observational study so inferences are restricted associations for the sample examined. The variables considered in this study were:\\
+\begin{itemize}
+\item Creation Software: Software used to create filing.
+\item Standard Industry Code:
+\item Filer status: Four categories, large accelerated filers, accelerated filers, non accelerated filers, and small reporting companies.
+\item Reference number:
+\item Company Name: Name of company
+\item Year: Year of filing 
+\item Taxonomy: Taxonomy which the company filed under. 
+\item Extension rate: extended element over the total number of elements (extended element + standard element). 
+\item Form Type: If filing a 10K or 10Q.
+
+\end{itemize}
+\section{Analysis}
+\noindent All the analysis below are from years 2012-2014 unless specified. \\
+
+\subsection{Preliminary Plots}
+<<boxplot1,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6>>=
+#all_data_2012_10K<-subset(all_data_10K,year_only >= 2012)
+#all_data_2012_10Q<-subset(all_data_10Q,year_only >= 2012)
+qplot(x=factor(year_only),y = extension_rate, data = all_data, geom = "boxplot", ylim=c(0,.6),
+      main="Extension Rate by Year", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+qplot(x=factor(year_only),y = extension_ratio, data = all_data, geom = "boxplot", ylim=c(0,.6),
+      main="Extension Rate by Year", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+hist(all_data$extension_ratio,breaks=100)
+hist(log(all_data$extension_ratio),breaks=100)
+@
+
+<<boxplot2,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6>>=
+qplot(x=factor(year_only),y = extension_rate, data = all_data, geom = "boxplot", facets = ~filer_category, ylim=c(0,.6),
+      main="Extension Rate by Year and Filing Status", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+qplot(x=factor(year_only),y = extension_ratio, data = all_data, geom = "boxplot", facets = ~filer_category, ylim=c(0,.6),
+      main="Extension Rate by Year and Filing Status", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(year_only),y = extension_ratio, data = all_data, geom = "boxplot", facets = ~filer_category, ylim=c(0,.6),
+      main="Extension Rate by Taxonomy Year and Filing Status", xlab="year", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+@
+
+
+<<plotser,echo=FALSE, warning=FALSE,message=FALSE, fig.width=10, fig.height=6>>=
+#all_data_2012_10K<-subset(all_data_10K,year_only >= 2012)
+#all_data_2012_10Q<-subset(all_data_10Q,year_only >= 2012)
+
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10K, geom = "boxplot", facets = ~taxonomy_year, ylim=c(0,.6),
+      main="Extension Rate For Taxonomy by Year for 10K", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white") + 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1"))
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot", facets = ~taxonomy_year, ylim=c(0,.6),
+      main="Extension Rate For Taxonomy by Year for 10Q", xlab="year", ylab="Extension Rate",
+      fill= factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="white")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1"))
+
+hist(all_data_2012_10K$extension_rate, xlim=c(0,1), breaks=100,freq=TRUE,
+     main="Histogram of Extension Rate for 10K", xlab="Extension Rate")
+
+
+hist(all_data_2012_10Q$extension_rate, xlim=c(0,1), breaks=100,freq=TRUE,
+     main="Histogram of Extension Rate for 10Q", xlab="Exteension Rate")
+
+
+@
+\pagebreak
+
+\subsubsection{Interactions}
+
+<<inter,echo=FALSE,fig.height=6,fig.width=10>>=
+par(mfrow=c(1,2))
+interaction.plot(factor(all_data_2012_10K$taxonomy_year), factor(all_data_2012_10K$year_only), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Taxonomy", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Year vs. Taxonomy")
+legend("topright",c("2014","2013", "2012"),lty=c(1,2,3), bty="n" )
+
+interaction.plot(factor(all_data_2012_10K$filer_category), factor(all_data_2012_10K$year_only), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Filer Status", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Year vs. Filer Status")
+legend("topright",c("2014","2013", "2012"),lty=c(1,2,3), bty="n" )
+
+interaction.plot(factor(all_data_2012_10K$filer_category), factor(all_data_2012_10K$taxonomy), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Filer Status", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Taxonomy vs. Filer Status")
+legend("topright",c("2014","2013", "2012", "2011", "2009"),lty=c(1,2,3,4,5), bty="n" )
+
+@
+\noindent Interaction terms are needed for this model since taxonomy depends on year and vice versa. To determine if an interaction between taxonomy and filer status or year and filer status is needed we will use the plots above to investigate. From the above interaction plot (the first plot) we see that interactions between year and taxonomy is needed. The need for interactions is indicated by the lack of overlap in terms of mean extension rate. For example the line for year 2012 and taxonomy 2012 intersect at about .12 mean extension rate, whereas, the line for year 2013 and taxonomy 2012 intersect at about .15. If there was no need for interaction we would expect at the intersections for both lines at taxonomy 2012 to have the same mean extension rate. Since they do no we need to include interactions between year and taxonomy in the model. In the other two above interaction plots we also see we need an interaction between taxonomy and filer status, and between year and filer status. \\
+
+\subsection{First Model}
+\noindent The response, extension rate, is a binomial count out of a total. Typically, a logistic regression would be fitted, however, we would like to treat the response as a ``continuous" proportion.\\
+Since extension rate can only take on values between 0 and 1 a transformation is needed before multiple linear regression is performed. An appropriate transformation would be the logit transformation,
+\begin{center}
+$logit(extension\_ rate)=log(\frac{extension\_ rate}{1-extension\_ rate})$.
+\end{center}
+Which is the log of the ratio of the proportion of extensions over the proportion of non-extensions. This ratio will be referred to as the extension ratio, $extension\_ ratio = \frac{p}{1-p}$, where $p$ is the extension rate (proportion of extensions). The extension ratio will provide the same information as extension rate does. For example, an increase in extension ratio implies an increase in extension rate. Then, one could proceed with multiple linear regression, using $log(extension\_ ratio)$ as the response under the assumption of normality. Interpretation is then done as usual for a log transformation of the response. \\
+Using extension ratio as the response is advantageous since we can directly interpret coefficients, whereas logistic regression with extension rate as the response is more complicated. \\
+Initially, the predictors chosen to use in the model are year (as a categorical variable), taxonomy (as a categorical variable), and filer status. The data set that is used to fit the model is a subset of the data (described in section 3.1) from years 2012 and up. The choice of considering data on years 2012 and up was due the requirement of filers to file with XBRL in the year 2012.  
+
+<<histlogit,echo=FALSE,fig.width=10,fig.height=6>>=
+par(mfrow=c(1,2))
+hist(all_data_2012_10K$extension_ratio,breaks=50)
+hist(all_data_2012_10K$log_er,breaks=50)
+
+@
+
+<<logitplot,echo=FALSE, fig.height=6, fig.width=10>>=
+attach(all_data_2012_10K)
+par(mfrow=c(1,2))
+all_2012<-subset(all_data_2012_10K,year_only == 2012)
+boxplot(all_2012$year_only,all_2012$extension_rate)
+#emp.prob
+emp.logit=log(extension_rate/(1-extension_rate))
+#emp.logit
+boxplot(emp.logit~year_only,type="n",main="Empirical Logit vs. Year 10K",
+ylab="Emprical Logits", xlab="year")
+points(year_only,emp.logit,pch=18)
+lines(lowess(year_only,emp.logit))
+
+boxplot(emp.logit~taxonomy_year,type="n",main="Empirical Logit vs. Taxonomy 10K",
+ylab="Emprical Logits", xlab="taxonomy")
+points(taxonomy_year,emp.logit,pch=18)
+lines(lowess(taxonomy_year,emp.logit))
+
+stat<-as.numeric(factor(filer_category))
+boxplot(emp.logit~stat,type="n",main="Empirical Logit vs. Status 10K",
+ylab="Emprical Logits", xlab="status")
+points(stat,emp.logit,pch=18)
+lines(lowess(stat,emp.logit))
+
+
+detach(all_data_2012_10K)
+@
+
+
+\subsubsection{Fit in R}
+{\small
+<<10Kfiter,echo=TRUE,background="white",comment="">>=
+
+
+filer_cat<-relevel(factor(all_data_2012_10K$filer_category), "LAF")
+
+
+
+fit_10K<-lm(log_er~(factor(year_only) + factor(taxonomy_year)+filer_cat)^2
+                     ,data=all_data_2012_10K)
+
+
+bin_fit_10K<-glm(extension_rate~(factor(year_only) + factor(taxonomy_year)+filer_cat)^2
+                     ,family=quasibinomial,data=all_data_2012_10K)
+
+conf_int<-confint(bin_fit_10K)
+
+getSlope.SE <-  function(yr){
+   #fit <- update(vote.fit1,  subset = year==yr & presvote <3)
+   summary(bin_fit_10K)$coef[2,1:2]
+ }
+pres.years <- c(2012,2013,2014)
+output <- sapply( pres.years ,getSlope.SE)
+
+plot (x=c(2012,2013,2014), y=summary(bin_fit_10K)$coef[1:3,1], xlim=c(2012,2014), 
+      mgp=c(2,.5,0), pch=20, main="Income Effects Over Years", ylab="Estimate", xlab="Year")
+
+segments(x0=c(2012,2013,2014),x1=c(2012,2013,2014), y0= summary(bin_fit_10K)$coef[1:3,1]-summary(bin_fit_10K)$coef[1:3,2],y1= summary(bin_fit_10K)$coef[1:3,1]+summary(bin_fit_10K)$coef[1:3,2])
+
+abline (h=0,lwd=.5, lty=2)
+
+
+getSlope.SE <-  function(yr){
+  # fit <- update(vote.fit1,  subset = year==yr & presvote <3)
+   summary(bin_fit_10K)$coef[1:3,1:2]
+ }
+pres.years <- c(2012,2013,2014)
+output <- sapply( pres.years ,getSlope.SE)
+
+plot (pres.years, output[1,], xlim=c(2012,2014), mgp=c(2,.5,0), pch=20, main="Income Effects Over Years", ylab="Estimate", xlab="Year")
+
+segments(x0=pres.years,x1=pres.years, y0= output[1,]-output[2,],y1= output[1,]+output[2,])
+
+abline (h=0,lwd=.5, lty=2)
+
+@
+}
+\pagebreak
+\subsubsection{Model Coefficients}
+<<tableer,echo=FALSE,results='asis'>>=
+xtable(summary(fit_10K), caption="Binomial Fit for 10K Response Extension Rate")
+
+@
+
+\pagebreak
+
+
+
+
+
+\subsubsection{Exponentiated Coefficients}
+
+<<transer,echo=FALSE,background="white",comment="">>=
+
+
+year12_tax9_LAF <- exp(coef(fit_10K)[1])
+year13 <- exp(coef(fit_10K)[2]) 
+year14 <- exp(coef(fit_10K)[3])
+taxyear11 <- exp(coef(fit_10K)[4])
+taxyear12 <- exp(coef(fit_10K)[5])
+taxyear13 <- exp(coef(fit_10K)[6])
+taxyear14 <- exp(coef(fit_10K)[7])
+AF<- exp(coef(fit_10K)[8])
+NAF<- exp(coef(fit_10K)[9])
+SRC<- exp(coef(fit_10K)[10])
+year2013_taxyear11 <- exp(coef(fit_10K)[11])
+year2013_taxyear12 <- exp(coef(fit_10K)[13])
+year2013_AF <- exp(coef(fit_10K)[19])
+year2014_AF <- exp(coef(fit_10K)[20])
+year2013_NAF <- exp(coef(fit_10K)[21])
+year2014_NAF <- exp(coef(fit_10K)[22])
+year2013_SRC <- exp(coef(fit_10K)[23])
+year2014_SRC <- exp(coef(fit_10K)[24])
+taxyear11AF <- exp(coef(fit_10K)[25])
+taxyear12AF <- exp(coef(fit_10K)[26])
+taxyear13AF <- exp(coef(fit_10K)[27])
+taxyear11NAF <- exp(coef(fit_10K)[29])
+taxyear12NAF <- exp(coef(fit_10K)[30])
+taxyear13NAF <- exp(coef(fit_10K)[31])
+taxyear11SRC <- exp(coef(fit_10K)[33])
+taxyear12SRC <-exp(coef(fit_10K)[34])
+taxyear13SRC <- exp(coef(fit_10K)[35])
+taxyear14SRC <- exp(coef(fit_10K)[36])
+
+
+
+
+@
+
+<<transtaber,echo=FALSE,results='asis'>>=
+trans5<-rbind(year12_tax9_LAF ,
+year13 ,
+year14 ,
+taxyear11, 
+taxyear12 ,
+taxyear13 ,
+taxyear14,
+AF,
+NAF,
+SRC,
+year2013_taxyear11 ,
+year2013_taxyear12 ,
+year2013_AF ,
+year2014_AF ,
+year2013_NAF ,
+year2014_NAF ,
+year2013_SRC,
+year2014_SRC ,
+taxyear11AF ,
+taxyear12AF ,
+taxyear13AF ,
+taxyear11NAF ,
+taxyear12NAF ,
+taxyear13NAF ,
+taxyear11SRC ,
+taxyear12SRC ,
+taxyear13SRC ,
+taxyear14SRC  )
+
+print(xtable(trans5, caption="Binomial Fit for 10K Response Extension Rate Odds"),include.colnames = FALSE, table.placement="h")
+
+##Make a table of the odds them summarize. Odds are multiplicative. 
+
+@
+\pagebreak
+\subsubsection{Interpretation}
+<<nicetab,echo=FALSE>>=
+odds_table <- read.csv("~/Documents/Workiva/MIA/Extensions_analysis/extension_model/logit_tab.csv")
+odds<-with(odds_table,cbind(LAF,AF,NAF,SRC))
+odds_table$taxonomy<-c(2009,2011,2012,2011,2012,2013,2012,2013,2014)
+@
+
+<<oddplot,echo=FALSE,fig.height=6,fig.width=10>>=
+par(mfrow=c(1,2))
+plot(y=odds_table$LAF[1:3],x=odds_table$taxonomy[1:3],type="o", col=2, lwd=4, xlim=c(2009,2014),
+     ylab="Odds of Extension", xlab="Taxonomy", ylim=c(0,1), main="LAF")  
+points(odds_table$LAF[4:6],x=odds_table$taxonomy[4:6],type="o", col=3, lwd=4)
+points(odds_table$LAF[7:9],x=odds_table$taxonomy[7:9],type="o", col=4, lwd=4)
+legend("topright", c("Year 2012", "Year 2013", "Year 2014"), col = c(2, 3, 4), lwd = c(4,4,4), bty = "n")
+
+plot(y=odds_table$AF[1:3],x=odds_table$taxonomy[1:3],type="o", col=2, lwd=4, xlim=c(2009,2014),
+     ylab="Odds of Extension", xlab="Taxonomy", ylim=c(0,1), main="AF")  
+points(odds_table$AF[4:6],x=odds_table$taxonomy[4:6],type="o", col=3, lwd=4)
+points(odds_table$AF[7:9],x=odds_table$taxonomy[7:9],type="o", col=4, lwd=4)
+legend("topright", c("Year 2012", "Year 2013", "Year 2014"), col = c(2, 3, 4), lwd = c(4,4,4), bty = "n")
+
+
+plot(y=odds_table$NAF[1:3],x=odds_table$taxonomy[1:3],type="o", col=2, lwd=4, xlim=c(2009,2014),
+     ylab="Odds of Extension", xlab="Taxonomy", ylim=c(0,1), main="NAF")  
+points(odds_table$NAF[4:6],x=odds_table$taxonomy[4:6],type="o", col=3, lwd=4)
+points(odds_table$NAF[7:9],x=odds_table$taxonomy[7:9],type="o", col=4, lwd=4)
+legend("topright", c("Year 2012", "Year 2013", "Year 2014"), col = c(2, 3, 4), lwd = c(4,4,4), bty = "n")
+
+plot(y=odds_table$SRC[1:3],x=odds_table$taxonomy[1:3],type="o", col=2, lwd=4, xlim=c(2009,2014),
+     ylab="Odds of Extension", xlab="Taxonomy", ylim=c(0,1), main="SRC")  
+points(odds_table$SRC[4:6],x=odds_table$taxonomy[4:6],type="o", col=3, lwd=4)
+points(odds_table$SRC[7:9],x=odds_table$taxonomy[7:9],type="o", col=4, lwd=4)
+legend("topright", c("Year 2012", "Year 2013", "Year 2014"), col = c(2, 3, 4), lwd = c(4,4,4), bty = "n")
+
+@
+\pagebreak
+<<printodd,echo=FALSE,results='asis'>>=
+print(xtable(odds_table, caption="Binomial Fit for 10K Response Extension Rate Odds"),include.colnames = TRUE,
+      include.rownames=FALSE, table.placement="h")
+@
+
+
+\noindent For LAF there is a decreasing trend in odds of extension as taxonomy increases. For AF we do not see any overwhelming trends. For NAF, there is a decreasing trend in the odds of extension as taxonomy increases. Similarly for SRC, we see a decreasing trend in the odds of an extension as taxonomy increases. 
+
+\subsubsection{Model Diagnostics}
+<<diagplot,echo=FALSE,fig.height=6,fig.width=10,warning=FALSE>>=
+par(mfrow=c(1,2))
+plot(fit_10K)
+@
+\end{document}
