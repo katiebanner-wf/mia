@@ -1,9 +1,9 @@
 ---
-title: "Familiarization with project"
+title: "Familiarization with project (`exten_wp4.pdf`)"
 output: html_document
 ---
 
-This document is for me (Katie Banner) to familarize myself with the work Lauren did investigating the trends over time in extension rate filings. 
+This document is intended to familarize a new analyst with the work Lauren did in 2014. A summary of her work is provided in `original-docs/exten_wp4.pdf`
 
 ```{r setup, include=FALSE}
 # load the packages Lauren used
@@ -21,7 +21,7 @@ library(nortest)
 library(nlme)
 library(lattice)
 library(lme4)
-library(R2jags)
+#library(R2jags)
 library(gee)
 ```
 
@@ -30,8 +30,11 @@ library(gee)
 - `ee_count` extended elements 
 - `ae_count` total elements $\implies$ `se_count` = `ae_count - se_count`
 - Recodes to shorten names of filer status (filer category)
-- Originally 434 unique 4-digit SIC codes - recoded to
+- Originally 434 unique 4-digit SIC codes - recoded to 11 categories
 
+    - This was done for 3 data sets: `all_without_table_codes.csv`, `all_with_table_codes.csv`, and `foot_notes_data.csv`.
+
+- Two form types and four filer categories - subsets of data are created in the following code chunk.
 
 ```{r data-readin, echo = FALSE, results='hide'}
 ## without face statements
@@ -110,8 +113,9 @@ all_data_1213_10Q<-subset(all_data_10Q,
                           year_only == 2012 | year_only== 2013)
 
 
-##subset data by filer categor. 
+##subset data by filer category 
 ##Four different models for filer categ. and for form 10K 
+
 all_data_LAF<- subset(all_data_2012_10K, filer_category=="LAF")
 all_data_AF<- subset(all_data_2012_10K, filer_category=="AF")
 all_data_NAF<- subset(all_data_2012_10K, filer_category=="NAF")
@@ -281,7 +285,90 @@ all_data_2012_10Kp<-all_data_2012_10K
 
 all_data_2012_10K<-all_data_2012_10K[-which(all_data_2012_10K$taxonomy==2009 & all_data_2012_10K$filer_category=="NAF"),]
 
+```
+
+
+- Create some exploratory plots: (I changed the "outlier color" to gray so they are visible)
+
+```{r eda, echo = FALSE}
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot",
+      main="Extension Rate by Taxonomy for 10-K", xlab="Taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot",
+      main="Extension Rate by Taxonomy for 10-Q", xlab="Taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot", facets = ~filer_category,
+      main="Extension Rate by Taxonomy and Filing Status for 10-K", xlab="taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(taxonomy_year),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot", facets = ~filer_category, 
+      main="Extension Rate by Taxonomy and Filing Status for 10-Q", xlab="taxonomy", ylab="Extension Rate",
+      fill = factor(taxonomy_year)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot",
+      main="Extension Rate by Year for 10-K", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot",
+      main="Extension Rate by Year for 10-Q", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot", facets = ~filer_category,
+      main="Extension Rate by Year and Filing Status for 10-K", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+
+qplot(x=factor(year_only),y = extension_rate, data = all_data_2012_10Q, geom = "boxplot", facets = ~filer_category, 
+      main="Extension Rate by Year and Filing Status for 10-Q", xlab="year", ylab="Extension Rate",
+      fill = factor(year_only)) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1", "lightcyan2", "cadetblue2"))
+
+
+qplot(x=filer_category,y = extension_rate, data = all_data_2012_10Kp, geom = "boxplot", 
+      main="Extension Rate by Filing Status for 10-K", xlab="Filing Status", ylab="Extension Rate",
+      fill = filer_category) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1"))
+
+qplot(x=filer_category,y = extension_rate, data = all_data_2012_10Q, geom = "boxplot", 
+      main="Extension Rate by Filing Status for 10-Q", xlab="Filing Status", ylab="Extension Rate",
+      fill = filer_category) + theme_bw() + geom_boxplot(outlier.colour="gray")+ 
+  scale_fill_manual(values=c("lightblue1", "lightblue2", "cadetblue1", "lightcyan1"))
+
 
 ```
 
 
+- Interaction plots 
+
+```{r, echo = FALSE}
+par(mfrow=c(1,3))
+interaction.plot(factor(all_data_2012_10K$taxonomy_year), factor(all_data_2012_10K$year_only), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Taxonomy", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Year vs. Taxonomy")
+legend("topright",c("2014","2013", "2012"),lty=c(1,2,3), bty="n" )
+
+interaction.plot(factor(all_data_2012_10K$filer_category), factor(all_data_2012_10K$year_only), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Filer Status", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Year vs. Filer Status")
+legend("topright",c("2014","2013", "2012"),lty=c(1,2,3), bty="n" )
+
+interaction.plot(factor(all_data_2012_10K$filer_category), factor(all_data_2012_10K$taxonomy), all_data_2012_10K$extension_rate, 
+                 fun = mean, type = c("l"), xlab="Filer Status", ylab="Mean Extension Rate", legend=FALSE, 
+                 main="Interaction Plot Taxonomy vs. Filer Status")
+legend("topright",c("2014","2013", "2012", "2011", "2009"),lty=c(1,2,3,4,5), bty="n" )
+```
+
+
+- Removed `r dim(all_data_2012_10K)[1] - dim(subset(all_data_2012_10K, ee_count !=0))[1]` zeroes before analysis of 10K data, and `r dim(all_data_2012_10Q)[1] - dim(subset(all_data_2012_10Q, ee_count !=0))[1]` from 10Q data.  _Should these be removed? Probably should remake exploratory plots without zeroes if going to use data without zeros. Similarly, should be made on logit scale._
+
+- Similar concerns for 2012 data. 
