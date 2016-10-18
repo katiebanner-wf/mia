@@ -370,5 +370,5 @@ legend("topright",c("2014","2013", "2012", "2011", "2009"),lty=c(1,2,3,4,5), bty
 
 
 - Removed `r dim(all_data_2012_10K)[1] - dim(subset(all_data_2012_10K, ee_count !=0))[1]` zeroes before analysis of 10K data, and `r dim(all_data_2012_10Q)[1] - dim(subset(all_data_2012_10Q, ee_count !=0))[1]` from 10Q data.  _Should these be removed? Probably should remake exploratory plots without zeroes if going to use data without zeros. Similarly, should be made on logit scale._
-
 - Similar concerns for 2012 data. 
+- Code for analysis and results were not moved to this file - they can be found in  `exten_wp4.Rnw`. This file was altered to read in the data from a relative working directory (`data/` directory), so it will compile if Knit pdf is clicked. 
