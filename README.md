@@ -12,6 +12,7 @@ __Initial analyses:__
 - Analysis of 2012 - 2014 data was done by Lauren Evans
 - Original work is available [in this google drive folder](https://drive.google.com/drive/folders/0Bwd8O9XpwVpifmZMSWlTNzVNMno0SVhnYUJnT1JzbXFvQ0luOTlqdmtJTDBKOFNHUHhzRG8)
 - A reorganized dropbox folder is located [here](https://drive.google.com/drive/folders/0B8xJOcoF5xgYQUhtR2YxVUJUem8)
+- A github repository can be found [here](https://github.com/katiebanner-wf/mia)
 
 __Organization of the new drive folder:__
 
